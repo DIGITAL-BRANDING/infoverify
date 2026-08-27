@@ -1,0 +1,18 @@
+[phases.setup]
+nixpkgsArchive = "51ad838b03a05b1de6f9f2a0fffecee64a9788ee"
+nixPkgs = ["nodejs_22"]
+
+[phases.install]
+cmds = [
+  "cd major_data_link_backend && NPM_CONFIG_PRODUCTION=false npm ci --cache /tmp/.npm --no-audit --no-fund",
+  "cd web && NPM_CONFIG_PRODUCTION=false npm ci --cache /tmp/.npm --no-audit --no-fund"
+]
+
+[phases.build]
+cmds = [
+  "cd major_data_link_backend && npm run prisma:generate",
+  "cd major_data_link_backend && npm run build",
+  "cd web && npm run build",
+  "rm -rf major_data_link_backend/public/app && mkdir -p major_data_link_backend/public/app",
+  "cp -r web/dist/. major_data_link_backend/public/app/"
+]

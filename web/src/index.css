@@ -1,0 +1,197 @@
+@import "tailwindcss";
+
+@theme {
+  /* Brand: Gold / Bronze / Ember - matches the Flutter app's identity */
+  --color-ink: #15100a;
+  --color-ink-soft: #221a10;
+  --color-ink-line: #3a2c16;
+
+  --color-cream: #fffaf0;
+  --color-parchment: #fbf0d9;
+  --color-parchment-line: #eaddb8;
+
+  --color-gold-50: #fffbeb;
+  --color-gold-200: #fce588;
+  --color-gold-400: #f7c948;
+  --color-gold-500: #d4af37;
+  --color-gold-600: #b8941f;
+  --color-gold-700: #9c7a17;
+
+  --color-bronze-500: #c9a227;
+  --color-bronze-700: #855f16;
+
+  --color-ember-400: #ff7b33;
+  --color-ember-500: #ff6b35;
+  --color-ember-600: #e55520;
+
+  --color-success-500: #10b981;
+  --color-success-600: #059669;
+
+  /* Assistant blue palette. Keep these explicit so Tailwind utilities such
+     as bg-brand-600/text-brand-800 always have a real, high-contrast color. */
+  --color-brand-50: #eff6ff;
+  --color-brand-200: #bfdbfe;
+  --color-brand-600: #2563eb;
+  --color-brand-700: #1d4ed8;
+  --color-brand-800: #1e3a8a;
+  --color-brand-900: #172554;
+
+  --color-ink-900: #1c140b;
+  --color-ink-600: #5c4d38;
+
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background: var(--color-cream);
+  color: var(--color-ink-900);
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: var(--color-gold-500); color: var(--color-ink); }
+
+a:focus-visible, button:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--color-ember-500);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.ticker-track { animation: ticker-scroll 32s linear infinite; }
+.ticker-row:hover .ticker-track { animation-play-state: paused; }
+.service-tile {
+  isolation: isolate;
+  border: 1px solid rgba(244, 194, 58, .52);
+  background:
+    radial-gradient(circle at 82% 12%, rgba(255, 207, 65, .30), transparent 25%),
+    radial-gradient(circle at 12% 105%, rgba(231, 161, 20, .23), transparent 34%),
+    linear-gradient(135deg, #100b04 0%, #261707 48%, #0d0a06 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 237, 169, .18), 0 8px 20px rgba(54, 31, 0, .22);
+}
+.service-tile::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  opacity: .34;
+  background-image: radial-gradient(circle, #f5bd28 1.3px, transparent 1.8px);
+  background-size: 15px 15px;
+  background-position: -5px -5px;
+  mask-image: linear-gradient(120deg, #000 0%, transparent 54%);
+}
+.service-tile::after {
+  content: "";
+  position: absolute;
+  inset: auto -24% 7px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #ffcb3e, transparent);
+  opacity: .78;
+}
+.service-tile:hover {
+  border-color: #ffe080;
+  box-shadow: inset 0 1px 0 rgba(255, 247, 205, .4), 0 12px 27px rgba(131, 78, 0, .42), 0 0 22px rgba(235, 175, 34, .20);
+}
+.service-tile-icon {
+  border: 1px solid rgba(255, 225, 131, .52);
+  background-color: rgba(255, 243, 205, .94) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .35), inset 0 1px 0 #fffdf4;
+}
+.premium-sidebar {
+  border-right: 1px solid rgba(244, 194, 58, .42);
+  background:
+    radial-gradient(circle at 85% 8%, rgba(244, 187, 36, .18), transparent 25%),
+    linear-gradient(155deg, #0a0805 0%, #211505 50%, #0b0906 100%);
+  box-shadow: inset -1px 0 rgba(255, 231, 145, .08), 8px 0 24px rgba(28, 16, 0, .18);
+}
+.premium-sidebar .logo-mark { filter: drop-shadow(0 0 7px rgba(255, 199, 52, .28)); }
+.premium-nav-link { color: #f7e7b2; transition: background .2s, color .2s, box-shadow .2s; }
+.premium-nav-link:hover { color: #fff8df; background: rgba(212, 175, 55, .16); }
+.premium-nav-link.is-active {
+  color: #160d02;
+  background: linear-gradient(135deg, #f7d76b, #b78316);
+  box-shadow: 0 5px 16px rgba(221, 164, 35, .28), inset 0 1px rgba(255, 247, 196, .65);
+}
+.premium-subnav { border-color: rgba(244, 194, 58, .45); }
+.premium-subnav button { color: #d7c28d; }
+.premium-subnav button:hover { color: #fff5cf; background: rgba(212, 175, 55, .14); }
+.premium-logout { border-top: 1px solid rgba(244, 194, 58, .2); color: #ffb09a; }
+.premium-logout:hover { background: rgba(220, 75, 45, .13); color: #ffd0c4; }
+
+.premium-activity {
+  overflow: hidden;
+  border-color: rgba(242, 194, 61, .7);
+  background: linear-gradient(135deg, #130d03 0%, #2e1d03 55%, #4a3107 100%);
+  box-shadow: 0 15px 32px rgba(25, 14, 0, .28), inset 0 1px rgba(255, 223, 126, .14);
+}
+.premium-activity-row { border-color: rgba(245, 208, 101, .55); }
+.premium-activity-title { color: #fff4c9; text-shadow: 0 1px 2px #000; }
+.premium-activity-date { color: #ffd86a; }
+.premium-activity-amount { color: #ffe69a; }
+
+/* Legacy page cards which still use the original light utility classes. */
+main .bg-white.rounded-xl,
+main .bg-white.rounded-2xl,
+main .bg-cream.rounded-xl.border,
+main .bg-cream.rounded-2xl.border {
+  border-color: rgba(212, 175, 55, .42) !important;
+  background: linear-gradient(145deg, #171106, #302004 62%, #4b3309) !important;
+  color: #fff4c9;
+  box-shadow: 0 12px 28px rgba(26, 15, 1, .17), inset 0 1px rgba(255, 221, 117, .12);
+}
+main .bg-white.rounded-xl .text-ink,
+main .bg-white.rounded-2xl .text-ink,
+main .bg-cream.rounded-xl.border .text-ink,
+main .bg-cream.rounded-2xl.border .text-ink { color: #fff4c9; }
+
+/* Premium surfaces used by service pages and shared containers.  The
+   selectors intentionally require a rounded card + border so form inputs
+   and status messages retain their semantic light/error colours. */
+main .rounded-2xl.border-parchment-line.bg-parchment,
+main .rounded-xl.border-parchment-line.bg-parchment,
+main .rounded-2xl.border.border-parchment-line.bg-parchment,
+main .rounded-xl.border.border-parchment-line.bg-parchment {
+  border-color: rgba(212, 175, 55, .42) !important;
+  background: linear-gradient(145deg, #171106 0%, #2b1c05 55%, #4a3208 100%) !important;
+  color: #fff4c9;
+  box-shadow: 0 12px 30px rgba(28, 17, 2, .16), inset 0 1px 0 rgba(255, 220, 112, .12);
+}
+
+main .rounded-2xl.border-parchment-line.bg-parchment h1,
+main .rounded-2xl.border-parchment-line.bg-parchment h2,
+main .rounded-2xl.border-parchment-line.bg-parchment h3,
+main .rounded-xl.border-parchment-line.bg-parchment h1,
+main .rounded-xl.border-parchment-line.bg-parchment h2,
+main .rounded-xl.border-parchment-line.bg-parchment h3 {
+  color: #fff4c9;
+}
+
+main .rounded-2xl.border-parchment-line.bg-parchment .text-ink-600,
+main .rounded-xl.border-parchment-line.bg-parchment .text-ink-600 {
+  color: #ead9a1;
+}
+
+main .rounded-2xl.border-parchment-line.bg-parchment:hover,
+main .rounded-xl.border-parchment-line.bg-parchment:hover {
+  border-color: rgba(255, 211, 78, .78) !important;
+  box-shadow: 0 16px 34px rgba(28, 17, 2, .24), 0 0 0 1px rgba(255, 211, 78, .18);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track { animation: none; }
+}

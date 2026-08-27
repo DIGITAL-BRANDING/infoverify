@@ -1,0 +1,12 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS",
+    "buildCommand": "cd major_data_link_backend && NPM_CONFIG_PRODUCTION=false npm install --cache /tmp/.npm --no-audit --no-fund && npm run prisma:generate && npm run build && cd ../web && NPM_CONFIG_PRODUCTION=false npm install --cache /tmp/.npm --no-audit --no-fund && npm run build && rm -rf ../major_data_link_backend/public/app && mkdir -p ../major_data_link_backend/public/app && cp -r dist/. ../major_data_link_backend/public/app/"
+  },
+  "deploy": {
+    "startCommand": "cd major_data_link_backend && npm run prisma:migrate:deploy && npm run start:prod",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3
+  }
+}
