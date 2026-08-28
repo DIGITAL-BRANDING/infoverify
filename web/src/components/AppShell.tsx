@@ -6,7 +6,6 @@ import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import MajorAssistant from './MajorAssistant';
 import NotificationPopup from './NotificationPopup';
-import { CONTACT } from '../lib/contact';
 
 type Notice = { id: string; title: string; body: string; is_read: boolean; created_at: string };
 const items = [

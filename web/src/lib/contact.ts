@@ -10,7 +10,7 @@ export const CONTACT = {
   emailDisplay: 'kindnesscomp20@gmail.com / sunusiusama94@gmail.com',
 };
 
-export function whatsappLink(text: string) {
+export function whatsappLink(_text: string) {
   return CONTACT.whatsappGroupUrl;
 }
 

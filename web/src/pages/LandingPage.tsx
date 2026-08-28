@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   Phone, 
@@ -6,17 +6,12 @@ import {
   MapPin, 
   Menu, 
   X, 
-  ChevronRight, 
   ShieldCheck, 
-  Globe, 
-  TrendingUp, 
-  Users, 
   ArrowRight,
   Smartphone,
   Wifi,
   Zap,
   Tv,
-  CheckCircle2,
   Lock,
   Headphones
 } from 'lucide-react';
