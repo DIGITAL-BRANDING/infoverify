@@ -82,21 +82,21 @@ export async function buildAdminRouter() {
       component: Components.Dashboard
     },
     branding: {
-      companyName: 'MAJOR DATA-LINK',
-      logo: '/branding/logo.png',
-      favicon: '/branding/favicon.png',
+      companyName: 'MARIA Digital Solutions',
+      logo: '/branding/logo.jpg',
+      favicon: '/branding/logo.jpg',
       withMadeWithLove: false,
       theme: {
         colors: {
           // Matches the app's brand palette (lib/core/constants/app_colors.dart):
           // Gold primary + Vivid Orange accent.
-          primary100: '#D4AF37',
-          primary80: '#F7C948',
-          primary60: '#FADB5F',
-          primary40: '#FCE588',
-          primary20: '#FFF3C4',
-          accent: '#FF6B35',
-          love: '#FF6B35'
+          primary100: '#0b2f73',
+          primary80: '#1452a0',
+          primary60: '#2563eb',
+          primary40: '#60a5fa',
+          primary20: '#dbeafe',
+          accent: '#06b6d4',
+          love: '#06b6d4'
         }
       }
     },

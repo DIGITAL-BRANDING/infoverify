@@ -104,19 +104,19 @@ const Dashboard: React.FC = () => (
       overflow="hidden"
       py="xxl"
       px={['default', 'lg', 'xxl']}
-      style={{ background: 'linear-gradient(135deg, #D4AF37 0%, #C9A227 100%)' }}
+      style={{ background: 'linear-gradient(135deg, #0b2f73 0%, #1452a0 100%)' }}
     >
       <Box display="flex" alignItems="center" flexDirection={['column', 'row']}>
         <Box mr={['0', 'xl']} mb={['lg', '0']}>
           <img
             src="/branding/logo.png"
-            alt="MAJOR DATA-LINK"
+            alt="MARIA Digital Solutions"
             style={{ width: 96, height: 96, borderRadius: 20, display: 'block' }}
           />
         </Box>
         <Box>
           <H2 color="white" fontWeight="bold">
-            Welcome to MAJOR DATA-LINK Admin
+            Welcome to MARIA Digital Solutions Admin
           </H2>
           <Text color="white" style={{ opacity: 0.85 }}>
             Manage customers, transactions, data plans and more from one place.
@@ -138,8 +138,8 @@ const Dashboard: React.FC = () => (
               <Box display="flex" alignItems="center" mb="default">
                 <Icon
                   icon={link.icon}
-                  color="#D4AF37"
-                  bg="rgba(212, 175, 55, 0.12)"
+                  color="#2563eb"
+                  bg="rgba(37, 99, 235, 0.12)"
                   rounded
                   size={22}
                   p="default"
