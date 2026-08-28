@@ -188,7 +188,7 @@ export default function MariaLandingPage() {
             </div>
 
             {/* Dashboard Card Frame */}
-            <div className="dashboard-overview relative bg-white rounded-2xl shadow-2xl p-6 text-slate-800 border border-slate-100 space-y-5">
+            <div className="dashboard-overview relative bg-[#0b2f73] rounded-2xl shadow-2xl p-6 text-white border border-blue-400/50 space-y-5">
               {/* Top Controls Header */}
               <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                 <div className="flex items-center gap-2">
@@ -308,7 +308,7 @@ export default function MariaLandingPage() {
               return (
                 <div key={index} className="bg-[#0b2f73] text-white p-6 rounded-2xl border border-blue-400/50 shadow-lg hover:shadow-xl transition-all duration-300 space-y-4 group flex flex-col justify-between">
                   <div className="space-y-4">
-                    <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-[#0A192F] group-hover:bg-[#0A192F] group-hover:text-[#D4AF37] transition-colors">
+                    <div className="w-12 h-12 bg-blue-500 rounded-xl flex items-center justify-center text-white group-hover:bg-cyan-500 transition-colors">
                       <IconComp className="w-6 h-6" />
                     </div>
                     <h3 className="text-xl font-bold text-white">{service.title}</h3>
@@ -338,9 +338,9 @@ export default function MariaLandingPage() {
           </div>
 
           <div className="grid md:grid-cols-3 gap-8">
-            <div className="p-8 rounded-2xl bg-slate-50 border border-slate-100 text-center space-y-4 hover:shadow-lg transition-all">
+            <div className="p-8 rounded-2xl bg-[#0b2f73] text-white border border-blue-400/50 text-center space-y-4 hover:shadow-lg transition-all">
               <div className="w-14 h-14 bg-[#0A192F] text-[#D4AF37] rounded-xl flex items-center justify-center mx-auto">
-                <Zap className="w-7 h-7" />
+                <Zap className="w-8 h-8 text-white" />
               </div>
               <h3 className="text-xl font-bold text-[#0A192F]">Lightning Fast</h3>
               <p className="text-slate-600 text-xs leading-relaxed">
@@ -348,9 +348,9 @@ export default function MariaLandingPage() {
               </p>
             </div>
 
-            <div className="p-8 rounded-2xl bg-slate-50 border border-slate-100 text-center space-y-4 hover:shadow-lg transition-all">
+            <div className="p-8 rounded-2xl bg-[#0b2f73] text-white border border-blue-400/50 text-center space-y-4 hover:shadow-lg transition-all">
               <div className="w-14 h-14 bg-[#0A192F] text-[#D4AF37] rounded-xl flex items-center justify-center mx-auto">
-                <Lock className="w-7 h-7" />
+                <Lock className="w-8 h-8 text-white" />
               </div>
               <h3 className="text-xl font-bold text-[#0A192F]">Secure & Safe</h3>
               <p className="text-slate-600 text-xs leading-relaxed">
@@ -358,9 +358,9 @@ export default function MariaLandingPage() {
               </p>
             </div>
 
-            <div className="p-8 rounded-2xl bg-slate-50 border border-slate-100 text-center space-y-4 hover:shadow-lg transition-all">
+            <div className="p-8 rounded-2xl bg-[#0b2f73] text-white border border-blue-400/50 text-center space-y-4 hover:shadow-lg transition-all">
               <div className="w-14 h-14 bg-[#0A192F] text-[#D4AF37] rounded-xl flex items-center justify-center mx-auto">
-                <Headphones className="w-7 h-7" />
+                <Headphones className="w-8 h-8 text-white" />
               </div>
               <h3 className="text-xl font-bold text-[#0A192F]">24/7 Support</h3>
               <p className="text-slate-600 text-xs leading-relaxed">

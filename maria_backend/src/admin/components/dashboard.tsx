@@ -109,16 +109,16 @@ const Dashboard: React.FC = () => (
       <Box display="flex" alignItems="center" flexDirection={['column', 'row']}>
         <Box mr={['0', 'xl']} mb={['lg', '0']}>
           <img
-            src="/branding/logo.png"
+            src="/branding/logo.jpg"
             alt="MARIA Digital Solutions"
             style={{ width: 96, height: 96, borderRadius: 20, display: 'block' }}
           />
         </Box>
         <Box>
-          <H2 color="white" fontWeight="bold">
+          <H2 color="#ffffff" fontWeight="bold" style={{ color: '#ffffff' }}>
             Welcome to MARIA Digital Solutions Admin
           </H2>
-          <Text color="white" style={{ opacity: 0.85 }}>
+          <Text color="#fff" style={{ opacity: 0.9, color: '#fff' }}>
             Manage customers, transactions, data plans and more from one place.
           </Text>
         </Box>
@@ -134,22 +134,22 @@ const Dashboard: React.FC = () => (
             href={link.href ?? `${ADMIN_ROOT_PATH}/resources/${link.resourceId}`}
             style={{ textDecoration: 'none', display: 'block', width: 280, flexGrow: 1, maxWidth: 340 }}
           >
-            <Box variant="white" boxShadow="card" p="lg" style={{ cursor: 'pointer', height: '100%' }}>
+            <Box variant="white" boxShadow="card" p="lg" style={{ cursor: 'pointer', height: '100%', background: '#0b2f73', borderRadius: 12 }}>
               <Box display="flex" alignItems="center" mb="default">
                 <Icon
                   icon={link.icon}
-                  color="#2563eb"
-                  bg="rgba(37, 99, 235, 0.12)"
+                  color="#ffffff"
+                  bg="rgba(96, 165, 250, 0.25)"
                   rounded
                   size={22}
                   p="default"
                   mr="default"
                 />
-                <Text fontWeight="bold" color="grey100">
+                <Text fontWeight="bold" color="#ffffff">
                   {link.label}
                 </Text>
               </Box>
-              <Text fontSize="sm" color="grey60">
+              <Text fontSize="sm" color="#dbeafe">
                 {link.description}
               </Text>
             </Box>

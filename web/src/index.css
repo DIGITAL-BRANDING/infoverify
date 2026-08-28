@@ -257,3 +257,5 @@ main#home #services .bg-white {
 main#home #services .bg-white h3,
 main#home #services .bg-white p,
 main#home #services .bg-white span { color: #ffffff !important; }
+main#home #features .bg-\[\#0b2f73\] h3, main#home #features .bg-\[\#0b2f73\] p { color: #ffffff !important; }
+main#home .dashboard-overview, main#home .dashboard-overview h3, main#home .dashboard-overview p, main#home .dashboard-overview span { color: #ffffff !important; }
