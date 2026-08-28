@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { TransactionStatus, TransactionType } from '@prisma/client';
 import { requireAuth } from '../middleware/auth.js';
 import { GEO_POLITICAL_ZONES, submitBvnLicense } from '../services/bvn-license-onboarding.service.js';
+import { CAC_TYPES, listCacHistory, listCacPrices, submitCacRequest, type CacType } from '../services/cac.service.js';
 import { pinField, requirePinConfirmation } from '../lib/require-pin.js';
 import { prisma } from '../lib/prisma.js';
 import {
@@ -324,4 +325,37 @@ verificationRoutes.post('/ipe-clearance', async (req, res) => {
 verificationRoutes.get('/ipe-clearance/:ticketId', async (req, res) => {
   const result = await checkIpeClearanceStatus({ userId: req.user!.id, ticketId: req.params.ticketId });
   res.json({ status: true, data: { ticket_id: result.ticketId, status: result.status, response: result.response } });
+});
+
+// ── CAC Services (manual — no provider API) ────────────────────────
+
+verificationRoutes.get('/cac/prices', async (_req, res) => {
+  const prices = await listCacPrices();
+  res.json({ status: true, data: prices });
+});
+
+verificationRoutes.post('/cac', async (req, res) => {
+  const body = z
+    .object({
+      cac_type: z.enum(CAC_TYPES),
+      proposed_name_1: z.string().trim().min(2).max(200),
+      proposed_name_2: z.string().trim().max(200).optional(),
+      ...pinField
+    })
+    .parse(req.body);
+  await requirePinConfirmation(req.user!.id, body.pin);
+  const result = await submitCacRequest({
+    userId: req.user!.id,
+    type: body.cac_type as CacType,
+    proposedName1: body.proposed_name_1,
+    proposedName2: body.proposed_name_2,
+    idempotencyKey: idempotencyKeyFrom(req)
+  });
+  res.json({ status: true, data: { reference: result.reference, balance_after: result.balanceAfter } });
+});
+
+verificationRoutes.get('/cac/history', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const data = await listCacHistory(req.user!.id);
+  res.json({ status: true, data });
 });

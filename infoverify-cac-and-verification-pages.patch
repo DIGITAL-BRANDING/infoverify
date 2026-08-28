@@ -1,0 +1,2044 @@
+From f1bdb25e68187ee36955ff76b0e6c5a2e1924c48 Mon Sep 17 00:00:00 2001
+From: Claude <dev@infoverify.local>
+Date: Fri, 28 Aug 2026 19:11:53 +0000
+Subject: [PATCH] Split NIN/Phone, BVN, IPE, Validation, Phone Multiple, and
+ CAC into their own pages; add CAC manual-fulfilment backend flow
+
+---
+ .../migration.sql                             |   1 +
+ maria_backend/prisma/schema.prisma            |   8 +
+ maria_backend/src/admin/cac.ts                | 172 ++++++++++
+ .../admin/resources/transaction.resource.ts   |  19 +-
+ maria_backend/src/admin/setup.ts              |   2 +
+ maria_backend/src/app.ts                      |   5 +-
+ .../src/routes/verification.routes.ts         |  34 ++
+ maria_backend/src/services/cac.service.ts     | 217 ++++++++++++
+ web/src/App.tsx                               |  23 +-
+ web/src/components/verification/shared.tsx    | 313 ++++++++++++++++++
+ .../verification/BvnVerificationPage.tsx      | 137 ++++++++
+ .../pages/verification/CacServicesPage.tsx    | 229 +++++++++++++
+ .../pages/verification/IpeClearancePage.tsx   | 163 +++++++++
+ .../verification/NinPhoneVerificationPage.tsx | 178 ++++++++++
+ .../pages/verification/PhoneMultiplePage.tsx  | 148 +++++++++
+ web/src/pages/verification/ValidationPage.tsx | 201 +++++++++++
+ 16 files changed, 1843 insertions(+), 7 deletions(-)
+ create mode 100644 maria_backend/prisma/migrations/20260828120000_add_cac_service_request/migration.sql
+ create mode 100644 maria_backend/src/admin/cac.ts
+ create mode 100644 maria_backend/src/services/cac.service.ts
+ create mode 100644 web/src/components/verification/shared.tsx
+ create mode 100644 web/src/pages/verification/BvnVerificationPage.tsx
+ create mode 100644 web/src/pages/verification/CacServicesPage.tsx
+ create mode 100644 web/src/pages/verification/IpeClearancePage.tsx
+ create mode 100644 web/src/pages/verification/NinPhoneVerificationPage.tsx
+ create mode 100644 web/src/pages/verification/PhoneMultiplePage.tsx
+ create mode 100644 web/src/pages/verification/ValidationPage.tsx
+
+diff --git a/maria_backend/prisma/migrations/20260828120000_add_cac_service_request/migration.sql b/maria_backend/prisma/migrations/20260828120000_add_cac_service_request/migration.sql
+new file mode 100644
+index 0000000..1157779
+--- /dev/null
++++ b/maria_backend/prisma/migrations/20260828120000_add_cac_service_request/migration.sql
+@@ -0,0 +1 @@
++ALTER TYPE "TransactionType" ADD VALUE IF NOT EXISTS 'CAC_SERVICE_REQUEST';
+diff --git a/maria_backend/prisma/schema.prisma b/maria_backend/prisma/schema.prisma
+index 2b083e3..a7c5b5b 100644
+--- a/maria_backend/prisma/schema.prisma
++++ b/maria_backend/prisma/schema.prisma
+@@ -63,6 +63,14 @@ enum TransactionType {
+   /// wallet at submission; the encrypted PDF is completed manually in
+   /// Techhub by an authorised admin, or reversed to refund the wallet.
+   BVN_LICENSE_ONBOARDING
++  /// A submitted CAC business registration request (Sole Proprietorship,
++  /// Partnership, Limited Liability, etc). There is no provider API for
++  /// this at all — the customer is debited at submission, an admin
++  /// registers the business by hand with CAC, optionally leaves progress
++  /// notes visible to the customer while it's in flight, and finally
++  /// uploads the completed certificate PDF, which marks the transaction
++  /// SUCCESS. See cac.service.ts.
++  CAC_SERVICE_REQUEST
+   /// The credit-back entry refundWallet() creates - distinct from the
+   /// original debit's own type (e.g. a reversed DATA_PURCHASE gets a REFUND
+   /// entry, not a second DATA_PURCHASE). See relatedTransactionId above.
+diff --git a/maria_backend/src/admin/cac.ts b/maria_backend/src/admin/cac.ts
+new file mode 100644
+index 0000000..815a351
+--- /dev/null
++++ b/maria_backend/src/admin/cac.ts
+@@ -0,0 +1,172 @@
++import type { Request, Router } from 'express';
++import { TransactionType } from '@prisma/client';
++import { prisma } from '../lib/prisma.js';
++import { completeCacRequest, decryptCacPII, updateCacProgressNotes } from '../services/cac.service.js';
++import { logAdminAction } from './audit.js';
++import type { AdminSessionUser } from './auth.js';
++
++declare module 'express-session' {
++  interface SessionData {
++    adminUser?: AdminSessionUser;
++  }
++}
++
++function escapeHtml(value: string) {
++  return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
++}
++
++/**
++ * Custom admin page (not an AdminJS record action) for handling a CAC
++ * request while it's PENDING - reached via the "manageCacRequest" action's
++ * redirectUrl on the Transaction resource. AdminJS's built-in record
++ * actions only support a single confirm-guard click, which is enough for
++ * completeModification/completeBvnLicense elsewhere, but not here: an admin
++ * needs to leave a free-text progress note (while still PENDING) and,
++ * separately, attach a real finished PDF certificate (which marks it
++ * SUCCESS). Both are handled by the one page below - the client-side script
++ * reads the chosen file with FileReader and posts it as base64 in a normal
++ * JSON body, so this needs no file-upload middleware (multer etc) at all.
++ */
++export function registerCacRoutes(router: Router) {
++  router.get('/cac/:transactionId/manage', async (req: Request, res) => {
++    const admin = req.session?.adminUser;
++    if (!admin) return res.redirect('/admin/login');
++    if (admin.role === 'SUPPORT') return res.status(403).type('html').send('<p>Support admins cannot manage CAC requests.</p>');
++
++    const id = Array.isArray(req.params.transactionId) ? req.params.transactionId[0] : req.params.transactionId;
++    const tx = await prisma.transaction.findUnique({ where: { id } });
++    if (!tx || tx.type !== TransactionType.CAC_SERVICE_REQUEST) {
++      return res.status(404).type('html').send('<p>CAC request not found.</p>');
++    }
++
++    await logAdminAction({ adminId: admin.id, action: 'VIEW_TRANSACTION_PII', targetType: 'Transaction', targetId: tx.id, metadata: { reference: tx.reference, via: 'cac_manage' } });
++
++    const metadata = tx.metadata as Record<string, unknown> | null;
++    const pii = decryptCacPII(tx);
++    const progressNotes = typeof metadata?.progress_notes === 'string' ? metadata.progress_notes : '';
++    const isPending = tx.status === 'PENDING';
++    const hasCertificate = typeof pii?.certificate_pdf_base64 === 'string' && pii.certificate_pdf_base64.length > 0;
++
++    res.type('html').send(`<!doctype html>
++<html><head><meta charset="utf-8"><title>Manage CAC request ${escapeHtml(tx.reference)}</title>
++<style>
++  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; }
++  h1 { font-size: 20px; } h2 { font-size: 15px; margin-top: 32px; }
++  .field { margin-top: 8px; }
++  textarea, input[type=file] { width: 100%; box-sizing: border-box; padding: 8px; font: inherit; }
++  textarea { min-height: 90px; }
++  button { margin-top: 12px; padding: 10px 18px; font: inherit; cursor: pointer; border: 0; border-radius: 6px; background: #6b4f0b; color: #fff; }
++  button:disabled { opacity: .5; cursor: not-allowed; }
++  .meta { color: #666; font-size: 13px; }
++  .status { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
++  .status.PENDING { background: #fff3cd; color: #7a5b00; }
++  .status.SUCCESS { background: #d4edda; color: #155724; }
++  #msg { margin-top: 12px; font-size: 14px; }
++</style></head>
++<body>
++  <p><a href="/admin/resources/Transaction/records/${tx.id}/show">&larr; Back to transaction</a></p>
++  <h1>CAC request — ${escapeHtml(tx.reference)}</h1>
++  <p class="meta">Status: <span class="status ${tx.status}">${tx.status}</span> · Type: ${escapeHtml(String(metadata?.cac_type ?? ''))}</p>
++  <p class="meta">Proposed name 1: <b>${escapeHtml(pii?.proposed_name_1 ?? '—')}</b><br>Proposed name 2: <b>${escapeHtml(pii?.proposed_name_2 ?? '—')}</b></p>
++  ${hasCertificate ? `<p class="meta">A certificate is already attached. <a href="#" onclick="downloadCert(event)">Download it</a>.</p>` : ''}
++
++  <h2>Progress note</h2>
++  <p class="meta">Visible to the customer on their CAC history table. Save this any time while the request is pending.</p>
++  <div class="field"><textarea id="notes" placeholder="e.g. Name reservation submitted, awaiting CAC approval">${escapeHtml(progressNotes)}</textarea></div>
++  <button id="saveNotes" ${isPending ? '' : 'disabled'}>Save progress note</button>
++
++  <h2>Complete request</h2>
++  <p class="meta">Upload the final CAC certificate once registration is done. This marks the request SUCCESS and lets the customer download it immediately.</p>
++  <div class="field"><input type="file" id="certFile" accept="application/pdf" ${isPending ? '' : 'disabled'} /></div>
++  <button id="complete" ${isPending ? '' : 'disabled'}>Mark complete &amp; attach certificate</button>
++
++  <p id="msg"></p>
++
++<script>
++  const txId = ${JSON.stringify(tx.id)};
++  const certBase64 = ${JSON.stringify(hasCertificate ? pii!.certificate_pdf_base64 : null)};
++  const msg = document.getElementById('msg');
++
++  function downloadCert(e) {
++    e.preventDefault();
++    if (!certBase64) return;
++    const a = document.createElement('a');
++    a.href = 'data:application/pdf;base64,' + certBase64;
++    a.download = ${JSON.stringify(tx.reference)} + '.pdf';
++    a.click();
++  }
++
++  document.getElementById('saveNotes').addEventListener('click', async () => {
++    msg.textContent = 'Saving…';
++    const res = await fetch('/admin/cac/' + txId + '/manage', {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ action: 'notes', progress_notes: document.getElementById('notes').value })
++    });
++    const data = await res.json().catch(() => ({}));
++    msg.textContent = res.ok ? 'Saved.' : (data.error || 'Failed to save.');
++  });
++
++  document.getElementById('complete').addEventListener('click', async () => {
++    const input = document.getElementById('certFile');
++    const file = input.files && input.files[0];
++    if (!file) { msg.textContent = 'Choose a PDF file first.'; return; }
++    if (file.type !== 'application/pdf') { msg.textContent = 'Please choose a PDF file.'; return; }
++    msg.textContent = 'Uploading…';
++    const reader = new FileReader();
++    reader.onload = async () => {
++      const base64 = reader.result.split(',')[1];
++      const res = await fetch('/admin/cac/' + txId + '/manage', {
++        method: 'POST',
++        headers: { 'Content-Type': 'application/json' },
++        body: JSON.stringify({ action: 'complete', certificate_pdf_base64: base64 })
++      });
++      const data = await res.json().catch(() => ({}));
++      if (res.ok) {
++        msg.textContent = 'Marked complete. Reloading…';
++        setTimeout(() => window.location.reload(), 800);
++      } else {
++        msg.textContent = data.error || 'Failed to complete.';
++      }
++    };
++    reader.readAsDataURL(file);
++  });
++</script>
++</body></html>`);
++  });
++
++  router.post('/cac/:transactionId/manage', async (req: Request, res) => {
++    const admin = req.session?.adminUser;
++    if (!admin) return res.status(401).json({ error: 'Not signed in' });
++    if (admin.role === 'SUPPORT') return res.status(403).json({ error: 'Support admins cannot manage CAC requests.' });
++
++    const id = Array.isArray(req.params.transactionId) ? req.params.transactionId[0] : req.params.transactionId;
++    const tx = await prisma.transaction.findUnique({ where: { id } });
++    if (!tx || tx.type !== TransactionType.CAC_SERVICE_REQUEST) {
++      return res.status(404).json({ error: 'CAC request not found' });
++    }
++
++    const body = req.body as { action?: string; progress_notes?: string; certificate_pdf_base64?: string };
++
++    try {
++      if (body.action === 'notes') {
++        await updateCacProgressNotes({ transactionId: tx.id, notes: String(body.progress_notes ?? '').slice(0, 2000) });
++        await logAdminAction({ adminId: admin.id, action: 'UPDATE_CAC_PROGRESS', targetType: 'Transaction', targetId: tx.id, metadata: { reference: tx.reference } });
++        return res.json({ ok: true });
++      }
++
++      if (body.action === 'complete') {
++        if (!body.certificate_pdf_base64 || typeof body.certificate_pdf_base64 !== 'string') {
++          return res.status(400).json({ error: 'A certificate PDF is required.' });
++        }
++        await completeCacRequest({ transactionId: tx.id, certificatePdfBase64: body.certificate_pdf_base64 });
++        await logAdminAction({ adminId: admin.id, action: 'COMPLETE_CAC_REQUEST', targetType: 'Transaction', targetId: tx.id, metadata: { reference: tx.reference } });
++        return res.json({ ok: true });
++      }
++
++      return res.status(400).json({ error: 'Unknown action' });
++    } catch (error) {
++      return res.status(422).json({ error: error instanceof Error ? error.message : 'Request failed' });
++    }
++  });
++}
+diff --git a/maria_backend/src/admin/resources/transaction.resource.ts b/maria_backend/src/admin/resources/transaction.resource.ts
+index 22ae691..a00c15c 100644
+--- a/maria_backend/src/admin/resources/transaction.resource.ts
++++ b/maria_backend/src/admin/resources/transaction.resource.ts
+@@ -65,7 +65,7 @@ export const transactionResource: ResourceWithOptions = {
+           // other transaction type, where PENDING means "still in flight,
+           // don't touch it", so this is the one type reverse() also allows
+           // from PENDING.
+-          if (status === 'PENDING') return ['NIN_MODIFICATION', 'BVN_LICENSE_ONBOARDING'].includes(record?.params?.type as string);
++          if (status === 'PENDING') return ['NIN_MODIFICATION', 'BVN_LICENSE_ONBOARDING', 'CAC_SERVICE_REQUEST'].includes(record?.params?.type as string);
+           return status === 'SUCCESS' || status === 'FAILED';
+         },
+         handler: async (request, response, context) => {
+@@ -241,6 +241,23 @@ export const transactionResource: ResourceWithOptions = {
+           const { record, currentAdmin } = context; if (!record) throw new Error('Missing record');
+           return { record: record.toJSON(currentAdmin), redirectUrl: `/admin/bvn-license/${record.params.id as string}/pdf` };
+         }
++      },
++      // Opens the custom "manage" page (admin/cac.ts) where an admin can save
++      // a progress note and/or upload the finished certificate PDF, which
++      // marks the request SUCCESS. Unlike completeModification/
++      // completeBvnLicense above, this needs a real form (a note + a file),
++      // not a single confirm-guard click, hence the redirect to a dedicated
++      // page instead of an inline handler.
++      manageCacRequest: {
++        actionType: 'record', icon: 'Edit',
++        isAccessible: ({ currentAdmin, record }) => {
++          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
++          return !!admin && admin.role !== 'SUPPORT' && record?.params?.type === 'CAC_SERVICE_REQUEST';
++        },
++        handler: async (_request, _response, context) => {
++          const { record, currentAdmin } = context; if (!record) throw new Error('Missing record');
++          return { record: record.toJSON(currentAdmin), redirectUrl: `/admin/cac/${record.params.id as string}/manage` };
++        }
+       }
+     }
+   }
+diff --git a/maria_backend/src/admin/setup.ts b/maria_backend/src/admin/setup.ts
+index 6f0b358..f397c63 100644
+--- a/maria_backend/src/admin/setup.ts
++++ b/maria_backend/src/admin/setup.ts
+@@ -14,6 +14,7 @@ import { registerUserWalletRoutes } from './user-wallet.js';
+ import { registerCustomerActivityRoutes } from './customer-activity.js';
+ import { registerNinModificationRoutes } from './nin-modification.js';
+ import { registerBvnLicenseRoutes } from './bvn-license-onboarding.js';
++import { registerCacRoutes } from './cac.js';
+ import { componentLoader, Components } from './component-loader.js';
+ import { userResource } from './resources/user.resource.js';
+ import { transactionResource } from './resources/transaction.resource.js';
+@@ -176,6 +177,7 @@ export async function buildAdminRouter() {
+   registerCustomerActivityRoutes(router);
+   registerNinModificationRoutes(router);
+   registerBvnLicenseRoutes(router);
++  registerCacRoutes(router);
+   registerUserDeliveryRoutes(router);
+ 
+   return { admin, router };
+diff --git a/maria_backend/src/app.ts b/maria_backend/src/app.ts
+index b25dd6c..c24c1f1 100644
+--- a/maria_backend/src/app.ts
++++ b/maria_backend/src/app.ts
+@@ -165,7 +165,10 @@ export function createApp() {
+   // and signature check exactly as before.
+   app.use('/api/webhooks', express.raw({ type: '*/*' }), webhookRoutes);
+ 
+-  app.use(express.json({ limit: '1mb' }));
++  // 8mb (was 1mb) so an admin can upload a scanned CAC certificate PDF as
++  // base64 through admin/cac.ts's manage page (base64 adds ~33% overhead on
++  // top of the original file size) without hitting this ceiling.
++  app.use(express.json({ limit: '8mb' }));
+ 
+   app.use('/api/auth', authLimiter, authRoutes);
+   app.use('/api/assistant', assistantRoutes);
+diff --git a/maria_backend/src/routes/verification.routes.ts b/maria_backend/src/routes/verification.routes.ts
+index ae5f558..79e8e29 100644
+--- a/maria_backend/src/routes/verification.routes.ts
++++ b/maria_backend/src/routes/verification.routes.ts
+@@ -3,6 +3,7 @@ import { z } from 'zod';
+ import { TransactionStatus, TransactionType } from '@prisma/client';
+ import { requireAuth } from '../middleware/auth.js';
+ import { GEO_POLITICAL_ZONES, submitBvnLicense } from '../services/bvn-license-onboarding.service.js';
++import { CAC_TYPES, listCacHistory, listCacPrices, submitCacRequest, type CacType } from '../services/cac.service.js';
+ import { pinField, requirePinConfirmation } from '../lib/require-pin.js';
+ import { prisma } from '../lib/prisma.js';
+ import {
+@@ -325,3 +326,36 @@ verificationRoutes.get('/ipe-clearance/:ticketId', async (req, res) => {
+   const result = await checkIpeClearanceStatus({ userId: req.user!.id, ticketId: req.params.ticketId });
+   res.json({ status: true, data: { ticket_id: result.ticketId, status: result.status, response: result.response } });
+ });
++
++// ── CAC Services (manual — no provider API) ────────────────────────
++
++verificationRoutes.get('/cac/prices', async (_req, res) => {
++  const prices = await listCacPrices();
++  res.json({ status: true, data: prices });
++});
++
++verificationRoutes.post('/cac', async (req, res) => {
++  const body = z
++    .object({
++      cac_type: z.enum(CAC_TYPES),
++      proposed_name_1: z.string().trim().min(2).max(200),
++      proposed_name_2: z.string().trim().max(200).optional(),
++      ...pinField
++    })
++    .parse(req.body);
++  await requirePinConfirmation(req.user!.id, body.pin);
++  const result = await submitCacRequest({
++    userId: req.user!.id,
++    type: body.cac_type as CacType,
++    proposedName1: body.proposed_name_1,
++    proposedName2: body.proposed_name_2,
++    idempotencyKey: idempotencyKeyFrom(req)
++  });
++  res.json({ status: true, data: { reference: result.reference, balance_after: result.balanceAfter } });
++});
++
++verificationRoutes.get('/cac/history', async (req, res) => {
++  res.set('Cache-Control', 'no-store');
++  const data = await listCacHistory(req.user!.id);
++  res.json({ status: true, data });
++});
+diff --git a/maria_backend/src/services/cac.service.ts b/maria_backend/src/services/cac.service.ts
+new file mode 100644
+index 0000000..21ecd4f
+--- /dev/null
++++ b/maria_backend/src/services/cac.service.ts
+@@ -0,0 +1,217 @@
++import { Prisma, TransactionStatus, TransactionType } from '@prisma/client';
++import { koboToNaira } from '../lib/money.js';
++import { sealPII, openPII, mergeSealedPII } from '../lib/pii.js';
++import { prisma } from '../lib/prisma.js';
++import { ApiError } from '../middleware/error.js';
++import { debitWallet } from './wallet.service.js';
++
++/**
++ * CAC Services — business name / company registration.
++ *
++ * There is no provider API for this anywhere in the codebase (unlike NIN/BVN,
++ * which go through Techhub). It follows the exact same manual pattern as NIN
++ * Modification (see nin-modification.service.ts) and BVN License Onboarding:
++ * the customer is debited at submission, the transaction sits PENDING, and an
++ * admin does the actual CAC filing by hand. Two things an admin can do from
++ * the Transaction page while it's PENDING (see admin/cac.ts):
++ *   - Save progress notes, visible to the customer on their history table
++ *     (matches the reference design's "Progress Notes" column).
++ *   - Mark it complete and attach the final certificate PDF, which the
++ *     customer can then download - this is the one difference from NIN
++ *     Modification, where the "PDF" is just a record of the submission, not
++ *     a genuine end-of-process CAC document.
++ *
++ * "Company more than 1M, NGO, Clubs, Association, Etc." has no fixed price
++ * in the reference design ("quote on request") and isn't included in
++ * CAC_TYPES below - support currently handles that one manually outside the
++ * app rather than through a zero-price submission.
++ */
++export const CAC_TYPES = ['sole', 'partnership', 'llc'] as const;
++export type CacType = (typeof CAC_TYPES)[number];
++
++const CAC_CONFIG: Record<CacType, { title: string; price: number }> = {
++  sole: { title: 'Business Name — Sole Proprietorship', price: 28000 },
++  partnership: { title: 'Business Name — Partnership', price: 32000 },
++  llc: { title: 'Limited Liability — 1M Share', price: 40000 }
++};
++
++function serviceKeyFor(type: CacType) {
++  return `CAC_${type.toUpperCase()}`;
++}
++
++function priceToKobo(amount: number) {
++  return BigInt(Math.round(amount * 100));
++}
++
++/** Same plain-findUnique-then-conditional-create shape used throughout this
++ *  codebase's pricing lookups (see getOrCreatePricingRow in
++ *  nin-modification.service.ts) - never resets an admin's already-configured
++ *  price back to the default. */
++async function getOrCreatePricingRow(type: CacType) {
++  const config = CAC_CONFIG[type];
++  const service = serviceKeyFor(type);
++  const existing = await prisma.servicePricing.findUnique({ where: { service } });
++  if (existing) return existing;
++
++  try {
++    return await prisma.servicePricing.create({
++      data: {
++        service,
++        provider: 'manual',
++        label: config.title,
++        providerCostKobo: priceToKobo(config.price)
++      }
++    });
++  } catch (error) {
++    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
++      return prisma.servicePricing.findUniqueOrThrow({ where: { service } });
++    }
++    throw error;
++  }
++}
++
++export async function getCacPrice(type: CacType) {
++  const row = await getOrCreatePricingRow(type);
++  if (!row.isActive) {
++    throw new ApiError(422, `${row.label} is currently unavailable`, 'SERVICE_INACTIVE');
++  }
++  const unitKobo = row.sellingPriceKobo ?? row.providerCostKobo;
++  return { unitPrice: koboToNaira(unitKobo), providerCostKobo: row.providerCostKobo };
++}
++
++/** Public price list - never throws on a disabled service. */
++export async function listCacPrices() {
++  const rows = await Promise.all(CAC_TYPES.map((type) => getOrCreatePricingRow(type)));
++  return rows.map((row, index) => ({
++    type: CAC_TYPES[index],
++    title: CAC_CONFIG[CAC_TYPES[index]].title,
++    unitPrice: koboToNaira(row.sellingPriceKobo ?? row.providerCostKobo),
++    isActive: row.isActive
++  }));
++}
++
++export type SubmitCacResult = { reference: string; balanceAfter: number };
++
++export async function submitCacRequest(params: {
++  userId: string;
++  type: CacType;
++  proposedName1: string;
++  proposedName2?: string;
++  idempotencyKey?: string;
++}): Promise<SubmitCacResult> {
++  const config = CAC_CONFIG[params.type];
++  const price = await getCacPrice(params.type);
++  const service = serviceKeyFor(params.type);
++
++  const debit = await debitWallet({
++    userId: params.userId,
++    amount: price.unitPrice,
++    type: TransactionType.CAC_SERVICE_REQUEST,
++    description: `CAC Services — ${config.title}`,
++    metadata: {
++      service,
++      cac_type: params.type,
++      unit_price: price.unitPrice,
++      progress_notes: null,
++      pii: sealPII({ proposed_name_1: params.proposedName1, proposed_name_2: params.proposedName2 ?? null })
++    } as Prisma.InputJsonValue,
++    idempotencyKey: params.idempotencyKey,
++    // No provider was actually paid yet - an admin pays CAC's fee when they
++    // manually file this. Same reasoning as NIN Modification's costKobo.
++    costKobo: price.providerCostKobo
++  });
++
++  return { reference: debit.reference, balanceAfter: debit.balanceAfter };
++}
++
++export type CacHistoryEntry = {
++  reference: string;
++  status: string;
++  cac_type: string | null;
++  proposed_name_1: string | null;
++  proposed_name_2: string | null;
++  amount: number;
++  progress_notes: string | null;
++  certificate_pdf_base64: string | null;
++  created_at: string;
++  updated_at: string;
++};
++
++/**
++ * Unlike NIN Modification's history (which only ever shows SUCCESS rows,
++ * see listModificationHistory), CAC registration can take days - the whole
++ * point of this table (matching the reference design's "Transactions" grid)
++ * is for the customer to track a request while it's still PENDING, so every
++ * status is included here, not just completed ones.
++ */
++export async function listCacHistory(userId: string) {
++  const transactions = await prisma.transaction.findMany({
++    where: { userId, type: TransactionType.CAC_SERVICE_REQUEST },
++    orderBy: { createdAt: 'desc' },
++    take: 50
++  });
++
++  return transactions.map((transaction): CacHistoryEntry => {
++    const metadata = transaction.metadata as Record<string, unknown> | null;
++    const pii = openPII<{ proposed_name_1?: string; proposed_name_2?: string | null; certificate_pdf_base64?: string }>(metadata?.pii);
++    return {
++      reference: transaction.reference,
++      status: transaction.status.toLowerCase(),
++      cac_type: typeof metadata?.cac_type === 'string' ? metadata.cac_type : null,
++      proposed_name_1: pii?.proposed_name_1 ?? null,
++      proposed_name_2: pii?.proposed_name_2 ?? null,
++      amount: koboToNaira(transaction.amountKobo),
++      progress_notes: typeof metadata?.progress_notes === 'string' ? metadata.progress_notes : null,
++      certificate_pdf_base64: typeof pii?.certificate_pdf_base64 === 'string' ? pii.certificate_pdf_base64 : null,
++      created_at: transaction.createdAt.toISOString(),
++      updated_at: transaction.updatedAt.toISOString()
++    };
++  });
++}
++
++/** Admin-only: update the customer-visible progress note without changing status. */
++export async function updateCacProgressNotes(params: { transactionId: string; notes: string }) {
++  const transaction = await prisma.transaction.findUnique({ where: { id: params.transactionId } });
++  if (!transaction || transaction.type !== TransactionType.CAC_SERVICE_REQUEST) {
++    throw new ApiError(404, 'CAC transaction not found', 'TRANSACTION_NOT_FOUND');
++  }
++  const metadata = (transaction.metadata as Record<string, unknown> | null) ?? {};
++  await prisma.transaction.update({
++    where: { id: transaction.id },
++    data: { metadata: { ...metadata, progress_notes: params.notes } as Prisma.InputJsonValue }
++  });
++}
++
++/**
++ * Admin-only: attaches the completed certificate and marks the request
++ * SUCCESS. Called once the admin has actually finished the CAC filing -
++ * there is no automatic path here, unlike verification.service.ts's
++ * Techhub-backed purchases.
++ */
++export async function completeCacRequest(params: { transactionId: string; certificatePdfBase64: string }) {
++  const transaction = await prisma.transaction.findUnique({ where: { id: params.transactionId } });
++  if (!transaction || transaction.type !== TransactionType.CAC_SERVICE_REQUEST) {
++    throw new ApiError(404, 'CAC transaction not found', 'TRANSACTION_NOT_FOUND');
++  }
++  if (transaction.status !== TransactionStatus.PENDING) {
++    throw new ApiError(422, 'Only a pending CAC request can be marked complete', 'INVALID_STATUS');
++  }
++
++  const metadata = (transaction.metadata as Record<string, unknown> | null) ?? {};
++  await prisma.transaction.update({
++    where: { id: transaction.id },
++    data: {
++      status: TransactionStatus.SUCCESS,
++      metadata: {
++        ...metadata,
++        pii: mergeSealedPII(metadata.pii, { certificate_pdf_base64: params.certificatePdfBase64 })
++      } as Prisma.InputJsonValue
++    }
++  });
++}
++
++/** Decrypts the sealed PII (proposed names + certificate) for the admin's manage page. Never call from a user-facing endpoint. */
++export function decryptCacPII(transaction: { metadata: unknown }) {
++  const metadata = transaction.metadata as Record<string, unknown> | null;
++  return openPII<{ proposed_name_1?: string; proposed_name_2?: string | null; certificate_pdf_base64?: string }>(metadata?.pii);
++}
+diff --git a/web/src/App.tsx b/web/src/App.tsx
+index fe503c1..47aa43d 100644
+--- a/web/src/App.tsx
++++ b/web/src/App.tsx
+@@ -15,6 +15,12 @@ import PrivacyRedirect from './pages/PrivacyRedirect';
+ import ResultPinPage from './pages/ResultPinPage';
+ import ResultCheckersPage from './pages/ResultCheckersPage';
+ import VerificationPage from './pages/VerificationPage';
++import NinPhoneVerificationPage from './pages/verification/NinPhoneVerificationPage';
++import PhoneMultiplePage from './pages/verification/PhoneMultiplePage';
++import CacServicesPage from './pages/verification/CacServicesPage';
++import BvnVerificationPage from './pages/verification/BvnVerificationPage';
++import IpeClearancePage from './pages/verification/IpeClearancePage';
++import ValidationPage from './pages/verification/ValidationPage';
+ import NinModificationPage from './pages/NinModificationPage';
+ import FundWalletPage from './pages/FundWalletPage';
+ import PaymentCallbackPage from './pages/PaymentCallbackPage';
+@@ -61,16 +67,23 @@ export default function App() {
+           <Route path="/waec-result" element={<ProtectedRoute><ResultPinPage exam="WAEC" /></ProtectedRoute>} />
+           <Route path="/neco-result" element={<ProtectedRoute><ResultPinPage exam="NECO" /></ProtectedRoute>} />
+           <Route path="/nabteb-result" element={<ProtectedRoute><ResultPinPage exam="NABTEB" /></ProtectedRoute>} />
++          {/* The catalog grid at /nin-services and /bvn-services still lists every NIN/BVN
++              service (including ones not covered by the six split-out pages below), so it
++              keeps using the original all-in-one VerificationPage. */}
+           <Route path="/nin-services" element={<ProtectedRoute><VerificationPage mode="nin" /></ProtectedRoute>} />
+-          <Route path="/nin" element={<ProtectedRoute><VerificationPage mode="nin" /></ProtectedRoute>} />
+-          <Route path="/nin-modification" element={<ProtectedRoute><NinModificationPage /></ProtectedRoute>} />
+           <Route path="/bvn-services" element={<ProtectedRoute><VerificationPage mode="bvn" /></ProtectedRoute>} />
+-          <Route path="/bvn" element={<ProtectedRoute><VerificationPage mode="bvn" /></ProtectedRoute>} />
++          {/* Six sidebar links now point at their own dedicated page + URL, matching the
++              reference screenshots, instead of sharing the generic VerificationPage. */}
++          <Route path="/nin" element={<ProtectedRoute><NinPhoneVerificationPage /></ProtectedRoute>} />
++          <Route path="/phone" element={<ProtectedRoute><PhoneMultiplePage /></ProtectedRoute>} />
++          <Route path="/cac" element={<ProtectedRoute><CacServicesPage /></ProtectedRoute>} />
++          <Route path="/bvn" element={<ProtectedRoute><BvnVerificationPage /></ProtectedRoute>} />
++          <Route path="/ipe" element={<ProtectedRoute><IpeClearancePage /></ProtectedRoute>} />
++          <Route path="/validation" element={<ProtectedRoute><ValidationPage /></ProtectedRoute>} />
++          <Route path="/nin-modification" element={<ProtectedRoute><NinModificationPage /></ProtectedRoute>} />
+           <Route path="/modification" element={<ProtectedRoute><NinModificationPage /></ProtectedRoute>} />
+-          <Route path="/validation" element={<ProtectedRoute><VerificationPage mode="nin" /></ProtectedRoute>} />
+           <Route path="/tracking" element={<ProtectedRoute><VerificationPage mode="nin" /></ProtectedRoute>} />
+           <Route path="/delink" element={<ProtectedRoute><VerificationPage mode="nin" /></ProtectedRoute>} />
+-          <Route path="/ipe" element={<ProtectedRoute><VerificationPage mode="nin" /></ProtectedRoute>} />
+           <Route path="/bvn-ret" element={<ProtectedRoute><VerificationPage mode="bvn" /></ProtectedRoute>} />
+           <Route path="/terms" element={<PrivacyRedirect page="terms" />} />
+           <Route path="/fund-wallet" element={<ProtectedRoute><FundWalletPage /></ProtectedRoute>} />
+diff --git a/web/src/components/verification/shared.tsx b/web/src/components/verification/shared.tsx
+new file mode 100644
+index 0000000..9405373
+--- /dev/null
++++ b/web/src/components/verification/shared.tsx
+@@ -0,0 +1,313 @@
++import { Download, Loader2, RefreshCw, CheckCircle2, XCircle, Clock } from 'lucide-react';
++import { useEffect, useState } from 'react';
++import { api } from '../../lib/api';
++
++// ── Shared types ────────────────────────────────────────────────
++export type PriceRow = { service: string; unitPrice: number; isActive: boolean };
++export type SlipResult = { user_data?: Record<string, unknown>; pdf_base64?: string; pdf_url?: string; reference: string };
++export type AsyncResult = { ticket_id: string; reference: string };
++export type TicketStatus = { ticket_id: string; status: 'pending' | 'success' | 'failed'; response: Record<string, unknown> | null };
++export type VerificationHistory = {
++  reference: string;
++  status: string;
++  created_at: string;
++  pdf_base64: string | null;
++  pdf_url: string | null;
++  ticket_id: string | null;
++};
++
++export const money = (amount?: number) =>
++  amount === undefined ? 'Price loading…' : `₦${amount.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`;
++
++// ── Prices ──────────────────────────────────────────────────────
++export function useVerificationPrices() {
++  const [prices, setPrices] = useState<Record<string, number>>({});
++  const [error, setError] = useState('');
++  useEffect(() => {
++    api
++      .get<{ data?: PriceRow[] } | PriceRow[]>('/verification/prices')
++      .then((result) => {
++        const rows = Array.isArray(result) ? result : (result.data ?? []);
++        setPrices(Object.fromEntries(rows.map((row) => [row.service, Number(row.unitPrice)])));
++      })
++      .catch(() => setError('Unable to load current prices. Please refresh and try again.'));
++  }, []);
++  return { prices, error };
++}
++
++// ── Recent request history for one service key ─────────────────
++export function useVerificationHistory(serviceKey: string) {
++  const [history, setHistory] = useState<VerificationHistory[]>([]);
++  const [loading, setLoading] = useState(false);
++  useEffect(() => {
++    if (!serviceKey) {
++      setHistory([]);
++      return;
++    }
++    let active = true;
++    setLoading(true);
++    api
++      .get<{ status: boolean; data: VerificationHistory[] }>(`/verification/history?service=${encodeURIComponent(serviceKey)}`)
++      .then((result) => {
++        if (active) setHistory(result.data ?? []);
++      })
++      .catch(() => {
++        if (active) setHistory([]);
++      })
++      .finally(() => {
++        if (active) setLoading(false);
++      });
++    return () => {
++      active = false;
++    };
++  }, [serviceKey]);
++  return { history, loading };
++}
++
++// ── Polling for async (ticketed) services ───────────────────────
++export function useTicketPolling(
++  path: string,
++  asyncResult: AsyncResult | null,
++  ticketStatus: TicketStatus | null,
++  setTicketStatus: (s: TicketStatus) => void
++) {
++  const [polling, setPolling] = useState(false);
++
++  async function checkTicket(silent = false) {
++    if (!asyncResult) return;
++    if (!silent) setPolling(true);
++    try {
++      const result = await api.get<{ status: boolean; data: TicketStatus }>(`${path}/${asyncResult.ticket_id}`);
++      setTicketStatus(result.data);
++    } catch {
++      // transient failures just mean "still can't tell yet" - the poll loop will retry
++    } finally {
++      if (!silent) setPolling(false);
++    }
++  }
++
++  useEffect(() => {
++    if (!asyncResult || ticketStatus?.status === 'success' || ticketStatus?.status === 'failed') return;
++    void checkTicket(true);
++    const id = setInterval(() => void checkTicket(true), 6000);
++    return () => clearInterval(id);
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [asyncResult, ticketStatus?.status]);
++
++  return { polling, checkTicket };
++}
++
++// ── Slip Type card grid (used by NIN, BVN, IPE, Validation pages) ─
++export function TierCardGrid<T extends string>({
++  options,
++  labels,
++  value,
++  onChange,
++  priceFor,
++}: {
++  options: readonly T[];
++  labels: Record<T, string>;
++  value: T;
++  onChange: (v: T) => void;
++  priceFor: (v: T) => number | undefined;
++}) {
++  return (
++    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
++      {options.map((option) => (
++        <button
++          key={option}
++          type="button"
++          onClick={() => onChange(option)}
++          className={`rounded-xl border p-4 text-center transition hover:-translate-y-0.5 ${
++            value === option ? 'border-[#8b6914] bg-[#6b4f0b] text-white shadow-md' : 'border-parchment-line bg-cream text-ink hover:border-gold-500'
++          }`}
++        >
++          <span className="block text-sm font-semibold">{labels[option]}</span>
++          <span className={`mt-1 block text-xs font-bold ${value === option ? 'text-[#ffe9a3]' : 'text-gold-700'}`}>{money(priceFor(option))}</span>
++        </button>
++      ))}
++    </div>
++  );
++}
++
++// ── Result views ──────────────────────────────────────────────────
++export function SlipResultView({ result, message, onDone }: { result: SlipResult; message: string; onDone: () => void }) {
++  const pdfBase64 = result.pdf_base64?.replace(/^data:application\/pdf;base64,/i, '');
++  const pdfHref = pdfBase64 ? `data:application/pdf;base64,${pdfBase64}` : result.pdf_url?.startsWith('https://') ? result.pdf_url : null;
++  const dataEntries = result.user_data ? Object.entries(result.user_data).filter(([, v]) => v !== null && v !== undefined) : [];
++
++  return (
++    <div className="mt-6">
++      <div className="flex items-center gap-2 rounded-lg border border-success-500/30 bg-success-500/5 px-4 py-3">
++        <CheckCircle2 size={18} className="shrink-0 text-success-500" />
++        <p className="font-body text-sm text-ink">{message}</p>
++      </div>
++
++      {dataEntries.length > 0 && (
++        <div className="mt-4 grid gap-x-6 gap-y-2 rounded-xl bg-cream p-4 sm:grid-cols-2">
++          {dataEntries.map(([key, value]) => (
++            <div key={key} className="flex justify-between border-b border-parchment-line py-1.5 text-sm">
++              <span className="font-body capitalize text-ink-600">{key.replace(/_/g, ' ')}</span>
++              <span className="font-body font-semibold text-ink">{String(value)}</span>
++            </div>
++          ))}
++        </div>
++      )}
++
++      {pdfHref && (
++        <a
++          href={pdfHref}
++          download={`${result.reference || 'slip'}.pdf`}
++          target={pdfBase64 ? undefined : '_blank'}
++          rel={pdfBase64 ? undefined : 'noreferrer'}
++          className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-gold-500 py-3 font-display font-semibold text-ink"
++        >
++          <Download size={16} /> Download PDF slip
++        </a>
++      )}
++
++      {!pdfHref && (
++        <p className="mt-4 rounded-xl border border-gold-500/30 bg-gold-500/10 p-3 font-body text-sm text-ink-600">
++          The provider confirmed this request, but did not return a downloadable PDF. Keep the reference above and contact support; do not submit or pay for the request again.
++        </p>
++      )}
++
++      <button onClick={onDone} className="mt-3 w-full rounded-xl border border-parchment-line py-2.5 font-body text-sm text-ink-600">
++        Done
++      </button>
++    </div>
++  );
++}
++
++export function AsyncResultView({
++  ticket,
++  status,
++  polling,
++  message,
++  onRefresh,
++  onDone,
++}: {
++  ticket: AsyncResult;
++  status: TicketStatus | null;
++  polling: boolean;
++  message: string;
++  onRefresh: () => void;
++  onDone: () => void;
++}) {
++  const state = status?.status ?? 'pending';
++  const responseEntries = status?.response ? Object.entries(status.response).filter(([, v]) => v !== null && v !== undefined) : [];
++
++  return (
++    <div className="mt-6">
++      {message && <p className="mb-4 rounded-lg bg-cream p-3 font-body text-sm text-ink-600">{message}</p>}
++
++      <div
++        className={`flex items-center gap-3 rounded-xl border px-4 py-4 ${
++          state === 'success' ? 'border-success-500/30 bg-success-500/5' : state === 'failed' ? 'border-ember-500/30 bg-ember-500/5' : 'border-parchment-line bg-cream'
++        }`}
++      >
++        {state === 'success' ? (
++          <CheckCircle2 size={22} className="text-success-500" />
++        ) : state === 'failed' ? (
++          <XCircle size={22} className="text-ember-500" />
++        ) : (
++          <Clock size={22} className="text-gold-600" />
++        )}
++        <div>
++          <p className="font-display font-semibold text-ink">{state === 'success' ? 'Approved' : state === 'failed' ? 'Rejected — refunded to your wallet' : 'Pending review'}</p>
++          <p className="font-mono text-xs text-ink-600">Ticket: {ticket.ticket_id}</p>
++        </div>
++      </div>
++
++      {responseEntries.length > 0 && (
++        <div className="mt-4 grid gap-x-6 gap-y-2 rounded-xl bg-cream p-4 sm:grid-cols-2">
++          {responseEntries.map(([key, value]) => (
++            <div key={key} className="flex justify-between border-b border-parchment-line py-1.5 text-sm">
++              <span className="font-body capitalize text-ink-600">{key.replace(/_/g, ' ')}</span>
++              <span className="font-body font-semibold text-ink">{String(value)}</span>
++            </div>
++          ))}
++        </div>
++      )}
++
++      {state === 'pending' && (
++        <button onClick={onRefresh} disabled={polling} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-parchment-line py-2.5 font-body text-sm text-ink-600 disabled:opacity-60">
++          {polling ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
++          Check again now
++        </button>
++      )}
++      <p className="mt-2 text-center font-body text-[11px] text-ink-400">We're also checking automatically every few seconds.</p>
++
++      <button onClick={onDone} className="mt-3 w-full rounded-xl border border-parchment-line py-2.5 font-body text-sm text-ink-600">
++        Done
++      </button>
++    </div>
++  );
++}
++
++export function VerificationHistoryView({ history, loading }: { history: VerificationHistory[]; loading: boolean }) {
++  return (
++    <section className="mt-8 border-t border-parchment-line pt-5">
++      <div className="flex items-baseline justify-between gap-3">
++        <h3 className="font-display text-base font-bold text-ink">Recent requests</h3>
++        <span className="font-body text-xs text-ink-600">Available for 7 days</span>
++      </div>
++      {loading ? (
++        <p className="mt-3 font-body text-sm text-ink-600">Loading recent requests…</p>
++      ) : history.length === 0 ? (
++        <p className="mt-3 rounded-xl border border-dashed border-parchment-line px-4 py-4 font-body text-sm text-ink-600">No request for this service in the last 7 days.</p>
++      ) : (
++        <div className="mt-3 divide-y divide-parchment-line overflow-hidden rounded-xl border border-parchment-line bg-cream">
++          {history.map((entry) => {
++            const base64 = entry.pdf_base64?.replace(/^data:application\/pdf;base64,/i, '');
++            const href = base64 ? `data:application/pdf;base64,${base64}` : entry.pdf_url?.startsWith('https://') ? entry.pdf_url : null;
++            return (
++              <div key={entry.reference} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
++                <div>
++                  <p className="font-mono text-xs font-semibold text-ink">{entry.reference}</p>
++                  <p className="mt-1 font-body text-xs text-ink-600">{new Date(entry.created_at).toLocaleString()}</p>
++                </div>
++                {href ? (
++                  <a href={href} download={`${entry.reference}.pdf`} target={base64 ? undefined : '_blank'} rel={base64 ? undefined : 'noreferrer'} className="flex items-center gap-2 rounded-lg bg-gold-500 px-3 py-2 font-body text-xs font-bold text-ink">
++                    <Download size={14} /> Retrieve PDF
++                  </a>
++                ) : (
++                  <span className="font-body text-xs font-semibold capitalize text-ink-600">{entry.status}</span>
++                )}
++              </div>
++            );
++          })}
++        </div>
++      )}
++    </section>
++  );
++}
++
++// ── Page header, matching the SLT reference screenshots' numbered steps ──
++export function PageHeader({ title, subtitle }: { title: string; subtitle?: string }) {
++  return (
++    <header className="mt-5 rounded-2xl border border-blue-400/50 bg-[#0b2f73] p-6">
++      <p className="font-body text-sm font-semibold text-gold-700">Identity services</p>
++      <h1 className="mt-1 font-display text-3xl font-bold text-ink">{title}</h1>
++      {subtitle && <p className="mt-2 font-body text-sm text-ink-600">{subtitle}</p>}
++    </header>
++  );
++}
++
++export function StepLabel({ n, children }: { n: number; children: React.ReactNode }) {
++  return (
++    <div className="mt-6 flex items-center gap-2 border-b border-parchment-line pb-2">
++      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gold-500 font-body text-xs font-bold text-ink">{n}</span>
++      <h3 className="font-display text-sm font-bold text-ink">{children}</h3>
++    </div>
++  );
++}
++
++export function ConsentCheckbox({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
++  return (
++    <label className="mt-5 flex items-start gap-2 font-body text-xs text-ink-600">
++      <input type="checkbox" required checked={checked} onChange={(e) => onChange(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-parchment-line" />
++      By checking this box, you agree that the owner of the ID has granted you consent to verify his/her identity.
++    </label>
++  );
++}
+diff --git a/web/src/pages/verification/BvnVerificationPage.tsx b/web/src/pages/verification/BvnVerificationPage.tsx
+new file mode 100644
+index 0000000..8760cc5
+--- /dev/null
++++ b/web/src/pages/verification/BvnVerificationPage.tsx
+@@ -0,0 +1,137 @@
++import { useMemo, useState, type FormEvent } from 'react';
++import { Loader2, Terminal } from 'lucide-react';
++import AppShell from '../../components/AppShell';
++import { api, ApiError } from '../../lib/api';
++import { PinConfirmDialog } from '../../components/PinConfirmDialog';
++import {
++  PageHeader,
++  StepLabel,
++  ConsentCheckbox,
++  SlipResultView,
++  VerificationHistoryView,
++  useVerificationPrices,
++  useVerificationHistory,
++  money,
++  type SlipResult,
++} from '../../components/verification/shared';
++
++// Screenshot calls these "Basic" and "Premium"; Techhub's own tiers (see
++// TechhubBvnTier in techhub.service.ts) are 'standard' and 'premium' - so
++// "Basic Slip" here maps onto the existing 'standard' tier rather than a
++// new one.
++const TIERS = ['standard', 'premium'] as const;
++type Tier = (typeof TIERS)[number];
++const TIER_LABEL: Record<Tier, string> = { standard: 'Basic Slip', premium: 'Premium Slip' };
++const TIER_KEY: Record<Tier, string> = { standard: 'BVN_SLIP_STANDARD', premium: 'BVN_SLIP_PREMIUM' };
++
++export default function BvnVerificationPage() {
++  const { prices } = useVerificationPrices();
++  const [tier, setTier] = useState<Tier>('standard');
++  const [bvn, setBvn] = useState('');
++  const [consent, setConsent] = useState(false);
++  const [showPin, setShowPin] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const [message, setMessage] = useState('');
++  const [result, setResult] = useState<SlipResult | null>(null);
++
++  const { history, loading: loadingHistory } = useVerificationHistory(TIER_KEY[tier]);
++  const price = useMemo(() => prices[TIER_KEY[tier]], [tier, prices]);
++
++  function prepare(event: FormEvent) {
++    event.preventDefault();
++    setShowPin(true);
++  }
++
++  async function submit(pin: string) {
++    setShowPin(false);
++    setBusy(true);
++    setMessage('');
++    try {
++      const result = await api.post<{
++        status: boolean;
++        message: string;
++        data?: { reference: string; user_data?: Record<string, unknown>; pdf_base64?: string; pdf_url?: string };
++      }>('/verification/bvn/slip', { bvn, tier, pin });
++      if (!result.status) throw new Error(result.message);
++      setResult({ user_data: result.data?.user_data, pdf_base64: result.data?.pdf_base64, pdf_url: result.data?.pdf_url, reference: result.data?.reference ?? '' });
++      setMessage(result.message || 'Done - your document is ready below.');
++    } catch (error) {
++      setMessage(error instanceof ApiError ? error.message : error instanceof Error ? error.message : 'Request failed.');
++    } finally {
++      setBusy(false);
++    }
++  }
++
++  return (
++    <AppShell>
++      <div className="mx-auto max-w-3xl">
++        <PageHeader title="BVN Verification" />
++
++        <section className="mt-6 rounded-2xl border border-blue-400/50 bg-[#0b2f73] p-6">
++          {!result ? (
++            <form onSubmit={prepare}>
++              <StepLabel n={1}>Slip layout</StepLabel>
++              <div className="mt-3 grid grid-cols-2 gap-3">
++                {TIERS.map((t) => (
++                  <button
++                    key={t}
++                    type="button"
++                    onClick={() => setTier(t)}
++                    className={`rounded-xl border p-4 text-center transition hover:-translate-y-0.5 ${
++                      tier === t ? 'border-[#8b6914] bg-[#6b4f0b] text-white shadow-md' : 'border-parchment-line bg-cream text-ink hover:border-gold-500'
++                    }`}
++                  >
++                    <span className="block font-semibold">{TIER_LABEL[t]}</span>
++                    <span className={`mt-1 block text-xs font-bold ${tier === t ? 'text-[#ffe9a3]' : 'text-gold-700'}`}>{money(prices[TIER_KEY[t]])}</span>
++                  </button>
++                ))}
++              </div>
++
++              <StepLabel n={2}>Supply BVN Number</StepLabel>
++              <div className="mt-3 flex items-start gap-2 rounded-xl border border-gold-500/30 bg-gold-500/10 p-3 font-body text-xs text-ink-600">
++                <Terminal size={16} className="mt-0.5 shrink-0 text-gold-700" />
++                <span>
++                  <b>Need help?</b> Dial <span className="font-mono">*565*0#</span> from your registered phone number to retrieve your BVN instantly.
++                </span>
++              </div>
++              <input
++                required
++                inputMode="numeric"
++                maxLength={11}
++                placeholder="BVN Number"
++                className="mt-3 w-full rounded-xl border border-parchment-line bg-cream p-3 text-ink outline-none focus:border-gold-500"
++                value={bvn}
++                onChange={(e) => setBvn(e.target.value)}
++              />
++              <p className="mt-1 font-body text-xs text-ink-600">We'll never share your details with anyone else.</p>
++
++              <ConsentCheckbox checked={consent} onChange={setConsent} />
++
++              <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
++                <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">Service cost: {money(price)}</span>
++                <button disabled={busy || !consent} className="flex items-center justify-center gap-2 rounded-xl bg-gold-500 px-6 py-3 font-display font-semibold text-ink disabled:opacity-60">
++                  {busy ? <Loader2 size={16} className="animate-spin" /> : 'Verify'}
++                </button>
++              </div>
++              {message && <p className="mt-3 rounded-lg bg-cream p-3 font-body text-sm text-ink-600">{message}</p>}
++            </form>
++          ) : (
++            <SlipResultView
++              result={result}
++              message={message}
++              onDone={() => {
++                setResult(null);
++                setMessage('');
++                setBvn('');
++              }}
++            />
++          )}
++
++          <VerificationHistoryView history={history} loading={loadingHistory} />
++        </section>
++      </div>
++
++      <PinConfirmDialog open={showPin} onClose={() => setShowPin(false)} onVerified={submit} />
++    </AppShell>
++  );
++}
+diff --git a/web/src/pages/verification/CacServicesPage.tsx b/web/src/pages/verification/CacServicesPage.tsx
+new file mode 100644
+index 0000000..9e834c5
+--- /dev/null
++++ b/web/src/pages/verification/CacServicesPage.tsx
+@@ -0,0 +1,229 @@
++import { useEffect, useMemo, useState, type FormEvent } from 'react';
++import { Download, Loader2 } from 'lucide-react';
++import AppShell from '../../components/AppShell';
++import { api, ApiError } from '../../lib/api';
++import { PinConfirmDialog } from '../../components/PinConfirmDialog';
++import { PageHeader, money } from '../../components/verification/shared';
++
++type CacType = 'sole' | 'partnership' | 'llc';
++type CacPriceRow = { type: CacType; title: string; unitPrice: number; isActive: boolean };
++type CacHistoryEntry = {
++  reference: string;
++  status: string;
++  cac_type: string | null;
++  proposed_name_1: string | null;
++  proposed_name_2: string | null;
++  amount: number;
++  progress_notes: string | null;
++  certificate_pdf_base64: string | null;
++  created_at: string;
++  updated_at: string;
++};
++
++const SERVICE_OPTIONS: { value: CacType; label: string }[] = [
++  { value: 'sole', label: 'Business Name Sole Proprietorship' },
++  { value: 'partnership', label: 'Business Name Partnership' },
++  { value: 'llc', label: 'Limited Liability 1M Share' }
++];
++
++const STATUS_LABEL: Record<string, string> = { pending: 'Processing', success: 'Completed', failed: 'Rejected', reversed: 'Refunded' };
++
++export default function CacServicesPage() {
++  const [prices, setPrices] = useState<CacPriceRow[]>([]);
++  const [service, setService] = useState<CacType | ''>('');
++  const [name1, setName1] = useState('');
++  const [name2, setName2] = useState('');
++  const [consent, setConsent] = useState(false);
++  const [showPin, setShowPin] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const [message, setMessage] = useState('');
++  const [history, setHistory] = useState<CacHistoryEntry[]>([]);
++  const [loadingHistory, setLoadingHistory] = useState(true);
++
++  const selectedPrice = useMemo(() => prices.find((p) => p.type === service)?.unitPrice, [prices, service]);
++
++  async function loadHistory() {
++    setLoadingHistory(true);
++    try {
++      const result = await api.get<{ status: boolean; data: CacHistoryEntry[] }>('/verification/cac/history');
++      setHistory(result.data ?? []);
++    } catch {
++      setHistory([]);
++    } finally {
++      setLoadingHistory(false);
++    }
++  }
++
++  useEffect(() => {
++    api
++      .get<{ status: boolean; data: CacPriceRow[] }>('/verification/cac/prices')
++      .then((result) => setPrices(result.data ?? []))
++      .catch(() => setPrices([]));
++    void loadHistory();
++  }, []);
++
++  function prepare(event: FormEvent) {
++    event.preventDefault();
++    setShowPin(true);
++  }
++
++  async function submit(pin: string) {
++    setShowPin(false);
++    setBusy(true);
++    setMessage('');
++    try {
++      const result = await api.post<{ status: boolean; message?: string; data?: { reference: string } }>('/verification/cac', {
++        cac_type: service,
++        proposed_name_1: name1,
++        proposed_name_2: name2 || undefined,
++        pin
++      });
++      if (!result.status) throw new Error(result.message);
++      setMessage(`Request submitted — reference ${result.data?.reference}. We'll register your business and update the status below.`);
++      setService('');
++      setName1('');
++      setName2('');
++      setConsent(false);
++      void loadHistory();
++    } catch (error) {
++      setMessage(error instanceof ApiError ? error.message : error instanceof Error ? error.message : 'Request failed.');
++    } finally {
++      setBusy(false);
++    }
++  }
++
++  return (
++    <AppShell>
++      <div className="mx-auto max-w-4xl">
++        <PageHeader title="CAC Services" subtitle="Business name and company registration. Requests are registered manually with CAC by our team — this isn't an instant service." />
++
++        <section className="mt-6 rounded-2xl border border-blue-400/50 bg-[#0b2f73] p-6">
++          <form onSubmit={prepare}>
++            <label className="font-body text-sm font-medium text-ink-600">
++              Choose Service
++              <select
++                required
++                value={service}
++                onChange={(e) => setService(e.target.value as CacType)}
++                className="mt-1 w-full rounded-xl border border-parchment-line bg-cream p-3 text-ink outline-none focus:border-gold-500"
++              >
++                <option value="">-- Select Service --</option>
++                {SERVICE_OPTIONS.map((s) => {
++                  const price = prices.find((p) => p.type === s.value);
++                  return (
++                    <option key={s.value} value={s.value} disabled={price ? !price.isActive : false}>
++                      {s.label} ({money(price?.unitPrice)})
++                    </option>
++                  );
++                })}
++              </select>
++              <span className="mt-1 block font-body text-xs text-ink-400">
++                Registering an NGO, Club, Association, or a company with more than ₦1,000,000 share capital? These are quoted individually — contact support instead of using this form.
++              </span>
++            </label>
++
++            {service && (
++              <>
++                <label className="mt-4 block font-body text-sm font-medium text-ink-600">
++                  Proposed Name 1
++                  <input
++                    required
++                    maxLength={200}
++                    placeholder="e.g. Amana Traders"
++                    className="mt-1 w-full rounded-xl border border-parchment-line bg-cream p-3 text-ink outline-none focus:border-gold-500"
++                    value={name1}
++                    onChange={(e) => setName1(e.target.value)}
++                  />
++                </label>
++                <label className="mt-4 block font-body text-sm font-medium text-ink-600">
++                  Proposed Name 2 <span className="font-normal text-ink-400">(backup, optional)</span>
++                  <input
++                    maxLength={200}
++                    placeholder="e.g. Amana Global Ventures"
++                    className="mt-1 w-full rounded-xl border border-parchment-line bg-cream p-3 text-ink outline-none focus:border-gold-500"
++                    value={name2}
++                    onChange={(e) => setName2(e.target.value)}
++                  />
++                </label>
++
++                <label className="mt-5 flex items-start gap-2 font-body text-xs text-ink-600">
++                  <input type="checkbox" required checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-parchment-line" />
++                  I confirm these business name(s) and details are accurate, and I authorise this registration on my behalf.
++                </label>
++
++                <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
++                  <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">Service cost: {money(selectedPrice)}</span>
++                  <button disabled={busy || !consent} className="flex items-center justify-center gap-2 rounded-xl bg-gold-500 px-6 py-3 font-display font-semibold text-ink disabled:opacity-60">
++                    {busy ? <Loader2 size={16} className="animate-spin" /> : 'Continue'}
++                  </button>
++                </div>
++              </>
++            )}
++            {message && <p className="mt-3 rounded-lg bg-cream p-3 font-body text-sm text-ink-600">{message}</p>}
++          </form>
++
++          <div className="mt-8 border-t border-parchment-line pt-5">
++            <h3 className="font-display text-base font-bold text-ink">Transactions</h3>
++
++            {loadingHistory ? (
++              <p className="mt-3 font-body text-sm text-ink-600">Loading…</p>
++            ) : history.length === 0 ? (
++              <p className="mt-3 rounded-xl border border-dashed border-parchment-line px-4 py-4 text-center font-body text-sm text-ink-600">No transactions recorded yet.</p>
++            ) : (
++              <div className="mt-3 overflow-x-auto rounded-xl border border-parchment-line bg-cream">
++                <table className="w-full text-left font-body text-xs">
++                  <thead>
++                    <tr className="border-b border-parchment-line text-ink-600">
++                      {['Ref ID', 'Type', 'Proposed Nm 1', 'Proposed Nm 2', 'Amount', 'Status', 'Progress Notes', 'Date', ''].map((h) => (
++                        <th key={h} className="whitespace-nowrap px-3 py-2 font-semibold">
++                          {h}
++                        </th>
++                      ))}
++                    </tr>
++                  </thead>
++                  <tbody>
++                    {history.map((row) => (
++                      <tr key={row.reference} className="border-b border-parchment-line last:border-0">
++                        <td className="whitespace-nowrap px-3 py-2 font-mono">{row.reference}</td>
++                        <td className="whitespace-nowrap px-3 py-2">{SERVICE_OPTIONS.find((s) => s.value === row.cac_type)?.label ?? row.cac_type}</td>
++                        <td className="px-3 py-2">{row.proposed_name_1 ?? '—'}</td>
++                        <td className="px-3 py-2">{row.proposed_name_2 ?? '—'}</td>
++                        <td className="whitespace-nowrap px-3 py-2">{money(row.amount)}</td>
++                        <td className="whitespace-nowrap px-3 py-2">
++                          <span
++                            className={`rounded-full px-2 py-1 text-[10px] font-bold ${
++                              row.status === 'success' ? 'bg-success-500/15 text-success-600' : row.status === 'pending' ? 'bg-gold-500/15 text-gold-700' : 'bg-ember-500/15 text-ember-600'
++                            }`}
++                          >
++                            {STATUS_LABEL[row.status] ?? row.status}
++                          </span>
++                        </td>
++                        <td className="max-w-[200px] px-3 py-2 text-ink-600">{row.progress_notes ?? '—'}</td>
++                        <td className="whitespace-nowrap px-3 py-2 text-ink-600">{new Date(row.created_at).toLocaleDateString()}</td>
++                        <td className="whitespace-nowrap px-3 py-2">
++                          {row.certificate_pdf_base64 ? (
++                            <a
++                              href={`data:application/pdf;base64,${row.certificate_pdf_base64}`}
++                              download={`${row.reference}.pdf`}
++                              className="flex items-center gap-1 rounded-lg bg-gold-500 px-2 py-1.5 font-bold text-ink"
++                            >
++                              <Download size={12} /> PDF
++                            </a>
++                          ) : (
++                            <span className="text-ink-400">—</span>
++                          )}
++                        </td>
++                      </tr>
++                    ))}
++                  </tbody>
++                </table>
++              </div>
++            )}
++          </div>
++        </section>
++      </div>
++
++      <PinConfirmDialog open={showPin} onClose={() => setShowPin(false)} onVerified={submit} />
++    </AppShell>
++  );
++}
+diff --git a/web/src/pages/verification/IpeClearancePage.tsx b/web/src/pages/verification/IpeClearancePage.tsx
+new file mode 100644
+index 0000000..635ac7f
+--- /dev/null
++++ b/web/src/pages/verification/IpeClearancePage.tsx
+@@ -0,0 +1,163 @@
++import { useState, type FormEvent } from 'react';
++import { Loader2, Lock } from 'lucide-react';
++import AppShell from '../../components/AppShell';
++import { api, ApiError } from '../../lib/api';
++import { PinConfirmDialog } from '../../components/PinConfirmDialog';
++import {
++  PageHeader,
++  StepLabel,
++  ConsentCheckbox,
++  AsyncResultView,
++  VerificationHistoryView,
++  useVerificationPrices,
++  useVerificationHistory,
++  useTicketPolling,
++  money,
++  type AsyncResult,
++  type TicketStatus,
++} from '../../components/verification/shared';
++
++// Only the first service type is wired to Techhub today (submitIpeClearance
++// only takes a tracking_id — see verification.routes.ts POST
++// /ipe-clearance). The other three cards from the reference design are
++// shown for parity but disabled until pricing/logic for them is added
++// server-side (each would need its own priced service key, the way
++// NIN_VALIDATION_* was split out per validation_type).
++const SERVICE_TYPES = [
++  { id: 'enrollment', label: 'NIN enrollment for tracking ID', note: '(Normal IPE only)', enabled: true },
++  { id: 'processing_error', label: 'InProcessing Error', note: '(Normal IPE)', enabled: false },
++  { id: 'invalid_tracking', label: 'Invalid Tracking ID', note: '(Normal IPE)', enabled: false },
++  { id: 'still_processing', label: 'Still Being Processed', note: '(Normal IPE)', enabled: false },
++] as const;
++
++const SLIP_TYPES = ['no-slip', 'regular', 'standard', 'premium'] as const;
++type SlipType = (typeof SLIP_TYPES)[number];
++const SLIP_LABEL: Record<SlipType, string> = { 'no-slip': 'No Slip', regular: 'Regular Slip', standard: 'Standard Slip', premium: 'Premium Slip' };
++
++export default function IpeClearancePage() {
++  const { prices } = useVerificationPrices();
++  const [slipType, setSlipType] = useState<SlipType>('no-slip');
++  const [trackingId, setTrackingId] = useState('');
++  const [consent, setConsent] = useState(false);
++  const [showPin, setShowPin] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const [message, setMessage] = useState('');
++  const [asyncResult, setAsyncResult] = useState<AsyncResult | null>(null);
++  const [ticketStatus, setTicketStatus] = useState<TicketStatus | null>(null);
++
++  const price = prices['IPE_CLEARANCE'];
++  const { history, loading: loadingHistory } = useVerificationHistory('IPE_CLEARANCE');
++  const { polling, checkTicket } = useTicketPolling('/verification/ipe-clearance', asyncResult, ticketStatus, setTicketStatus);
++
++  function prepare(event: FormEvent) {
++    event.preventDefault();
++    setShowPin(true);
++  }
++
++  async function submit(pin: string) {
++    setShowPin(false);
++    setBusy(true);
++    setMessage('');
++    try {
++      const result = await api.post<{ status: boolean; message: string; data?: { reference: string; ticket_id?: string } }>('/verification/ipe-clearance', {
++        tracking_id: trackingId,
++        pin,
++      });
++      if (!result.status) throw new Error(result.message);
++      if (!result.data?.ticket_id) throw new Error('No ticket was returned - please contact support.');
++      setAsyncResult({ ticket_id: result.data.ticket_id, reference: result.data.reference });
++      setMessage("Request submitted. We'll check its status below - this is usually reviewed within a few minutes.");
++    } catch (error) {
++      setMessage(error instanceof ApiError ? error.message : error instanceof Error ? error.message : 'Request failed.');
++    } finally {
++      setBusy(false);
++    }
++  }
++
++  return (
++    <AppShell>
++      <div className="mx-auto max-w-4xl">
++        <PageHeader title="IPE Clearance (Instant)" />
++
++        <section className="mt-6 rounded-2xl border border-blue-400/50 bg-[#0b2f73] p-6">
++          {!asyncResult ? (
++            <form onSubmit={prepare}>
++              <StepLabel n={1}>Service Type</StepLabel>
++              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
++                {SERVICE_TYPES.map((s) => (
++                  <div
++                    key={s.id}
++                    className={`relative rounded-xl border p-4 text-center ${
++                      s.enabled ? 'border-[#8b6914] bg-[#6b4f0b] text-white shadow-md' : 'cursor-not-allowed border-parchment-line bg-cream text-ink-400 opacity-60'
++                    }`}
++                  >
++                    {!s.enabled && <Lock size={12} className="absolute right-2 top-2" />}
++                    <span className="block text-xs font-semibold leading-tight">{s.label}</span>
++                    <span className="mt-1 block text-[10px]">{s.note}</span>
++                    <span className={`mt-1 block text-xs font-bold ${s.enabled ? 'text-[#ffe9a3]' : ''}`}>{s.enabled ? money(price) : 'Coming soon'}</span>
++                  </div>
++                ))}
++              </div>
++
++              <StepLabel n={2}>Slip Type</StepLabel>
++              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
++                {SLIP_TYPES.map((s) => (
++                  <button
++                    key={s}
++                    type="button"
++                    onClick={() => setSlipType(s)}
++                    className={`rounded-xl border p-4 text-center transition hover:-translate-y-0.5 ${
++                      slipType === s ? 'border-[#8b6914] bg-[#6b4f0b] text-white shadow-md' : 'border-parchment-line bg-cream text-ink hover:border-gold-500'
++                    }`}
++                  >
++                    <span className="block text-sm font-semibold">{SLIP_LABEL[s]}</span>
++                    <span className={`mt-1 block text-xs font-bold ${slipType === s ? 'text-[#ffe9a3]' : 'text-gold-700'}`}>{s === 'no-slip' ? money(0) : 'Coming soon'}</span>
++                  </button>
++                ))}
++              </div>
++
++              <StepLabel n={3}>Supply Tracking ID</StepLabel>
++              <input
++                required
++                maxLength={15}
++                placeholder="Tracking ID (15 characters)"
++                className="mt-3 w-full rounded-xl border border-parchment-line bg-cream p-3 text-ink outline-none focus:border-gold-500"
++                value={trackingId}
++                onChange={(e) => setTrackingId(e.target.value)}
++              />
++              <p className="mt-1 font-body text-xs text-ink-600">Enter your 15-character alphanumeric Tracking ID (e.g., ABC123456789012)</p>
++
++              <ConsentCheckbox checked={consent} onChange={setConsent} />
++
++              <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
++                <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">Service cost: {money(price)}</span>
++                <button disabled={busy || !consent} className="flex items-center justify-center gap-2 rounded-xl bg-gold-500 px-6 py-3 font-display font-semibold text-ink disabled:opacity-60">
++                  {busy ? <Loader2 size={16} className="animate-spin" /> : 'Submit Verification'}
++                </button>
++              </div>
++              {message && <p className="mt-3 rounded-lg bg-cream p-3 font-body text-sm text-ink-600">{message}</p>}
++            </form>
++          ) : (
++            <AsyncResultView
++              ticket={asyncResult}
++              status={ticketStatus}
++              polling={polling}
++              message={message}
++              onRefresh={() => checkTicket(false)}
++              onDone={() => {
++                setAsyncResult(null);
++                setTicketStatus(null);
++                setMessage('');
++                setTrackingId('');
++              }}
++            />
++          )}
++
++          <VerificationHistoryView history={history} loading={loadingHistory} />
++        </section>
++      </div>
++
++      <PinConfirmDialog open={showPin} onClose={() => setShowPin(false)} onVerified={submit} />
++    </AppShell>
++  );
++}
+diff --git a/web/src/pages/verification/NinPhoneVerificationPage.tsx b/web/src/pages/verification/NinPhoneVerificationPage.tsx
+new file mode 100644
+index 0000000..a4b3bc7
+--- /dev/null
++++ b/web/src/pages/verification/NinPhoneVerificationPage.tsx
+@@ -0,0 +1,178 @@
++import { useMemo, useState, type FormEvent } from 'react';
++import { Loader2 } from 'lucide-react';
++import AppShell from '../../components/AppShell';
++import { api, ApiError } from '../../lib/api';
++import { PinConfirmDialog } from '../../components/PinConfirmDialog';
++import {
++  PageHeader,
++  StepLabel,
++  ConsentCheckbox,
++  TierCardGrid,
++  SlipResultView,
++  VerificationHistoryView,
++  useVerificationPrices,
++  useVerificationHistory,
++  money,
++  type SlipResult,
++} from '../../components/verification/shared';
++
++type Method = 'nin' | 'phone';
++const NIN_TIERS = ['information', 'regular', 'standard', 'premium', 'vnin'] as const;
++const PHONE_TIERS = ['regular', 'standard', 'premium'] as const;
++type NinTier = (typeof NIN_TIERS)[number];
++type PhoneTier = (typeof PHONE_TIERS)[number];
++
++const NIN_TIER_LABELS: Record<NinTier, string> = {
++  information: 'Information Slip',
++  regular: 'Regular Slip',
++  standard: 'Standard Slip',
++  premium: 'Premium Slip',
++  vnin: 'V-NIN Slip',
++};
++const PHONE_TIER_LABELS: Record<PhoneTier, string> = {
++  regular: 'Regular Slip',
++  standard: 'Standard Slip',
++  premium: 'Premium Slip',
++};
++
++// "Information Slip" isn't wired up on Techhub's side yet (see
++// maria_backend/src/services/techhub.service.ts — TechhubSlipTier only
++// has premium/standard/regular/vnin). It renders here so the page matches
++// the reference design, but stays disabled and un-priced until the backend
++// adds that tier.
++const NIN_KEY: Record<Exclude<NinTier, 'information'>, string> = {
++  regular: 'NIN_SLIP_REGULAR',
++  standard: 'NIN_SLIP_STANDARD',
++  premium: 'NIN_SLIP_PREMIUM',
++  vnin: 'NIN_SLIP_VNIN',
++};
++const PHONE_KEY: Record<PhoneTier, string> = {
++  regular: 'NIN_PHONE_SLIP_REGULAR',
++  standard: 'NIN_PHONE_SLIP_STANDARD',
++  premium: 'NIN_PHONE_SLIP_PREMIUM',
++};
++
++export default function NinPhoneVerificationPage() {
++  const { prices } = useVerificationPrices();
++  const [method, setMethod] = useState<Method>('nin');
++  const [idValue, setIdValue] = useState('');
++  const [ninTier, setNinTier] = useState<NinTier>('premium');
++  const [phoneTier, setPhoneTier] = useState<PhoneTier>('premium');
++  const [consent, setConsent] = useState(false);
++  const [showPin, setShowPin] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const [message, setMessage] = useState('');
++  const [result, setResult] = useState<SlipResult | null>(null);
++
++  const serviceKey = method === 'nin' ? (ninTier === 'information' ? '' : NIN_KEY[ninTier]) : PHONE_KEY[phoneTier];
++  const { history, loading: loadingHistory } = useVerificationHistory(serviceKey);
++  const price = useMemo(() => (serviceKey ? prices[serviceKey] : undefined), [serviceKey, prices]);
++
++  function prepare(event: FormEvent) {
++    event.preventDefault();
++    if (method === 'nin' && ninTier === 'information') {
++      setMessage('The Information Slip is not available yet — please pick another slip type.');
++      return;
++    }
++    setShowPin(true);
++  }
++
++  async function submit(pin: string) {
++    setShowPin(false);
++    setBusy(true);
++    setMessage('');
++    try {
++      const path = method === 'nin' ? '/verification/nin/by-nin' : '/verification/nin/by-phone';
++      const body = method === 'nin' ? { nin: idValue, tier: ninTier, pin } : { phone: idValue, tier: phoneTier, pin };
++      const result = await api.post<{
++        status: boolean;
++        message: string;
++        data?: { reference: string; user_data?: Record<string, unknown>; pdf_base64?: string; pdf_url?: string };
++      }>(path, body);
++      if (!result.status) throw new Error(result.message);
++      setResult({ user_data: result.data?.user_data, pdf_base64: result.data?.pdf_base64, pdf_url: result.data?.pdf_url, reference: result.data?.reference ?? '' });
++      setMessage(result.message || 'Done - your document is ready below.');
++    } catch (error) {
++      setMessage(error instanceof ApiError ? error.message : error instanceof Error ? error.message : 'Request failed.');
++    } finally {
++      setBusy(false);
++    }
++  }
++
++  return (
++    <AppShell>
++      <div className="mx-auto max-w-4xl">
++        <PageHeader title="NIN_Phone Verification" subtitle="Verify a NIN directly, or look one up by its registered phone number." />
++
++        <section className="mt-6 rounded-2xl border border-blue-400/50 bg-[#0b2f73] p-6">
++          {!result ? (
++            <form onSubmit={prepare}>
++              <StepLabel n={1}>Choose Verification Method</StepLabel>
++              <div className="mt-3 flex gap-6 font-body text-sm font-medium text-ink">
++                <label className="flex items-center gap-2">
++                  <input type="radio" checked={method === 'nin'} onChange={() => { setMethod('nin'); setIdValue(''); setMessage(''); }} /> NIN ID
++                </label>
++                <label className="flex items-center gap-2">
++                  <input type="radio" checked={method === 'phone'} onChange={() => { setMethod('phone'); setIdValue(''); setMessage(''); }} /> Phone No
++                </label>
++              </div>
++
++              <StepLabel n={2}>Supply ID Number</StepLabel>
++              <input
++                required
++                inputMode="numeric"
++                maxLength={11}
++                placeholder={method === 'nin' ? 'Enter NIN' : 'Enter Phone Number'}
++                className="mt-3 w-full rounded-xl border border-parchment-line bg-cream p-3 text-ink outline-none focus:border-gold-500"
++                value={idValue}
++                onChange={(e) => setIdValue(e.target.value)}
++              />
++              <p className="mt-1 font-body text-xs text-ink-600">
++                {method === 'nin' ? 'Enter your 11-digit NIN (e.g., 12345678901)' : 'Enter your 11-digit phone number starting with 0 (e.g., 08012345678)'}
++              </p>
++
++              <StepLabel n={3}>Select Your Preferred Slip Type</StepLabel>
++              <div className="mt-3">
++                {method === 'nin' ? (
++                  <TierCardGrid
++                    options={NIN_TIERS}
++                    labels={NIN_TIER_LABELS}
++                    value={ninTier}
++                    onChange={setNinTier}
++                    priceFor={(t) => (t === 'information' ? undefined : prices[NIN_KEY[t]])}
++                  />
++                ) : (
++                  <TierCardGrid options={PHONE_TIERS} labels={PHONE_TIER_LABELS} value={phoneTier} onChange={setPhoneTier} priceFor={(t) => prices[PHONE_KEY[t]]} />
++                )}
++              </div>
++
++              <ConsentCheckbox checked={consent} onChange={setConsent} />
++
++              <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
++                <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">Service cost: {money(price)}</span>
++                <button disabled={busy || !consent} className="flex items-center justify-center gap-2 rounded-xl bg-gold-500 px-6 py-3 font-display font-semibold text-ink disabled:opacity-60">
++                  {busy ? <Loader2 size={16} className="animate-spin" /> : 'Verify'}
++                </button>
++              </div>
++              {message && <p className="mt-3 rounded-lg bg-cream p-3 font-body text-sm text-ink-600">{message}</p>}
++            </form>
++          ) : (
++            <SlipResultView
++              result={result}
++              message={message}
++              onDone={() => {
++                setResult(null);
++                setMessage('');
++                setIdValue('');
++              }}
++            />
++          )}
++
++          <VerificationHistoryView history={history} loading={loadingHistory} />
++        </section>
++      </div>
++
++      <PinConfirmDialog open={showPin} onClose={() => setShowPin(false)} onVerified={submit} />
++    </AppShell>
++  );
++}
+diff --git a/web/src/pages/verification/PhoneMultiplePage.tsx b/web/src/pages/verification/PhoneMultiplePage.tsx
+new file mode 100644
+index 0000000..18b82d4
+--- /dev/null
++++ b/web/src/pages/verification/PhoneMultiplePage.tsx
+@@ -0,0 +1,148 @@
++import { useState, type FormEvent } from 'react';
++import { Loader2 } from 'lucide-react';
++import AppShell from '../../components/AppShell';
++import { api, ApiError } from '../../lib/api';
++import { PinConfirmDialog } from '../../components/PinConfirmDialog';
++import { PageHeader, StepLabel, ConsentCheckbox, money, useVerificationPrices } from '../../components/verification/shared';
++
++/**
++ * "Phone Multiple" — enter a phone number, get back every NIN record linked
++ * to it (flat ₦150), as opposed to /nin's "Phone No" method, which returns
++ * one tiered slip.
++ *
++ * EXPECTED BACKEND CONTRACT (not yet implemented — wire this up against
++ * whatever Techhub/other provider call actually does this lookup):
++ *
++ *   GET  /verification/prices               → must include a
++ *        { service: 'NIN_PHONE_MULTIPLE', unitPrice, isActive } row for the
++ *        price shown below to resolve (falls back to "Price loading…" until
++ *        it does).
++ *
++ *   POST /verification/nin/phone-multiple
++ *     body: { phone: string, pin: string }
++ *     success response:
++ *       { status: true, message: string,
++ *         data: { reference: string, results: PhoneMultipleRecord[] } }
++ *     failure response: { status: false, message: string }
++ *     (results is an ARRAY, possibly empty if no NIN is linked to the
++ *     number — the frontend treats an empty array as "no linked records"
++ *     and does not treat that as an error)
++ *
++ *   GET  /verification/history?service=NIN_PHONE_MULTIPLE
++ *     Same shape as every other service's history endpoint (see
++ *     useVerificationHistory in shared.tsx) — reused as-is, no changes
++ *     needed there once this service key exists.
++ */
++type PhoneMultipleRecord = {
++  nin?: string;
++  full_name?: string;
++  [key: string]: unknown;
++};
++
++const SERVICE_KEY = 'NIN_PHONE_MULTIPLE';
++
++export default function PhoneMultiplePage() {
++  const { prices } = useVerificationPrices();
++  const [phone, setPhone] = useState('');
++  const [consent, setConsent] = useState(false);
++  const [showPin, setShowPin] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const [message, setMessage] = useState('');
++  const [results, setResults] = useState<PhoneMultipleRecord[] | null>(null);
++
++  function prepare(event: FormEvent) {
++    event.preventDefault();
++    setShowPin(true);
++  }
++
++  async function submit(pin: string) {
++    setShowPin(false);
++    setBusy(true);
++    setMessage('');
++    try {
++      const result = await api.post<{ status: boolean; message: string; data?: { results?: PhoneMultipleRecord[] } }>('/verification/nin/phone-multiple', { phone, pin });
++      if (!result.status) throw new Error(result.message);
++      setResults(result.data?.results ?? []);
++      setMessage(result.message || 'Done.');
++    } catch (error) {
++      setMessage(error instanceof ApiError ? error.message : error instanceof Error ? error.message : 'Request failed.');
++    } finally {
++      setBusy(false);
++    }
++  }
++
++  return (
++    <AppShell>
++      <div className="mx-auto max-w-3xl">
++        <PageHeader
++          title="Phone Number Verification"
++          subtitle="Enter your phone number to retrieve linked NIN information. If the phone number is connected to multiple NIN records, all matched results will be shown."
++        />
++
++        <section className="mt-6 rounded-2xl border border-blue-400/50 bg-[#0b2f73] p-6">
++          {results === null ? (
++            <form onSubmit={prepare}>
++              <StepLabel n={1}>Enter Phone Number</StepLabel>
++              <input
++                required
++                inputMode="numeric"
++                maxLength={11}
++                placeholder="Enter Phone Number"
++                className="mt-3 w-full rounded-xl border border-parchment-line bg-cream p-3 text-ink outline-none focus:border-gold-500"
++                value={phone}
++                onChange={(e) => setPhone(e.target.value)}
++              />
++              <p className="mt-1 font-body text-xs text-ink-600">Enter your 11-digit phone number starting with 0 (e.g., 08012345678). One phone number may return multiple linked NIN records.</p>
++
++              <ConsentCheckbox checked={consent} onChange={setConsent} />
++
++              <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
++                <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">Service cost: {money(prices[SERVICE_KEY])}</span>
++                <button disabled={busy || !consent} className="flex items-center justify-center gap-2 rounded-xl bg-gold-500 px-6 py-3 font-display font-semibold text-ink disabled:opacity-60">
++                  {busy ? <Loader2 size={16} className="animate-spin" /> : `Verify (${money(prices[SERVICE_KEY])})`}
++                </button>
++              </div>
++              {message && <p className="mt-3 rounded-lg bg-cream p-3 font-body text-sm text-ink-600">{message}</p>}
++            </form>
++          ) : (
++            <div>
++              <p className="rounded-lg bg-cream p-3 font-body text-sm text-ink-600">{message}</p>
++
++              {results.length === 0 ? (
++                <p className="mt-4 rounded-xl border border-dashed border-parchment-line px-4 py-6 text-center font-body text-sm text-ink-600">No NIN records are linked to this phone number.</p>
++              ) : (
++                <div className="mt-4 space-y-3">
++                  {results.map((record, index) => (
++                    <div key={String(record.nin ?? index)} className="rounded-xl bg-cream p-4">
++                      {Object.entries(record)
++                        .filter(([, value]) => value !== null && value !== undefined)
++                        .map(([key, value]) => (
++                          <div key={key} className="flex justify-between border-b border-parchment-line py-1.5 text-sm last:border-0">
++                            <span className="font-body capitalize text-ink-600">{key.replace(/_/g, ' ')}</span>
++                            <span className="font-body font-semibold text-ink">{String(value)}</span>
++                          </div>
++                        ))}
++                    </div>
++                  ))}
++                </div>
++              )}
++
++              <button
++                onClick={() => {
++                  setResults(null);
++                  setMessage('');
++                  setPhone('');
++                }}
++                className="mt-4 w-full rounded-xl border border-parchment-line py-2.5 font-body text-sm text-ink-600"
++              >
++                Done
++              </button>
++            </div>
++          )}
++        </section>
++      </div>
++
++      <PinConfirmDialog open={showPin} onClose={() => setShowPin(false)} onVerified={submit} />
++    </AppShell>
++  );
++}
+diff --git a/web/src/pages/verification/ValidationPage.tsx b/web/src/pages/verification/ValidationPage.tsx
+new file mode 100644
+index 0000000..555f5bf
+--- /dev/null
++++ b/web/src/pages/verification/ValidationPage.tsx
+@@ -0,0 +1,201 @@
++import { useMemo, useState, type FormEvent } from 'react';
++import { Info, Loader2 } from 'lucide-react';
++import AppShell from '../../components/AppShell';
++import { api, ApiError } from '../../lib/api';
++import { PinConfirmDialog } from '../../components/PinConfirmDialog';
++import {
++  PageHeader,
++  StepLabel,
++  ConsentCheckbox,
++  AsyncResultView,
++  VerificationHistoryView,
++  useVerificationPrices,
++  useVerificationHistory,
++  useTicketPolling,
++  money,
++  type AsyncResult,
++  type TicketStatus,
++} from '../../components/verification/shared';
++
++// The four detail types shown in the reference design — a subset of the
++// eight validation_type values Techhub's nin_validation.php actually
++// accepts (see the zod enum in verification.routes.ts). The rest (General,
++// SIM, Bank, Photographic error) still work through the API; they're just
++// not part of this screen's four cards.
++const DETAILS = [
++  { value: 'no_record', label: 'No Record Found', serviceKey: 'NIN_VALIDATION_NO_RECORD' },
++  { value: 'update_records', label: 'Update Record', serviceKey: 'NIN_VALIDATION_UPDATE_RECORDS' },
++  { value: 'modification', label: 'Validate Modification', serviceKey: 'NIN_VALIDATION_MODIFICATION' },
++  { value: 'v.nin_validation', label: 'vNIN Validation', serviceKey: 'NIN_VALIDATION_VNIN' },
++] as const;
++type DetailValue = (typeof DETAILS)[number]['value'];
++
++// Slip type has no effect on Techhub's nin-validation submission today
++// (submitNinValidation only takes nin + validation_type) — it renders here
++// to match the reference design and defaults to the free "No Slip" option.
++const SLIP_TYPES = ['no-slip', 'regular', 'standard', 'premium'] as const;
++type SlipType = (typeof SLIP_TYPES)[number];
++const SLIP_LABEL: Record<SlipType, string> = { 'no-slip': 'No Slip', regular: 'Regular Slip', standard: 'Standard Slip', premium: 'Premium Slip' };
++
++export default function ValidationPage() {
++  const { prices } = useVerificationPrices();
++  const [detail, setDetail] = useState<DetailValue>('no_record');
++  const [slipType, setSlipType] = useState<SlipType>('no-slip');
++  const [nin, setNin] = useState('');
++  const [consent, setConsent] = useState(false);
++  const [showPin, setShowPin] = useState(false);
++  const [showInfo, setShowInfo] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const [message, setMessage] = useState('');
++  const [asyncResult, setAsyncResult] = useState<AsyncResult | null>(null);
++  const [ticketStatus, setTicketStatus] = useState<TicketStatus | null>(null);
++
++  const serviceKey = DETAILS.find((d) => d.value === detail)!.serviceKey;
++  const { history, loading: loadingHistory } = useVerificationHistory(serviceKey);
++  const price = useMemo(() => prices[serviceKey], [serviceKey, prices]);
++  const { polling, checkTicket } = useTicketPolling('/verification/nin-validation', asyncResult, ticketStatus, setTicketStatus);
++
++  function prepare(event: FormEvent) {
++    event.preventDefault();
++    setShowPin(true);
++  }
++
++  async function submit(pin: string) {
++    setShowPin(false);
++    setBusy(true);
++    setMessage('');
++    try {
++      const result = await api.post<{ status: boolean; message: string; data?: { reference: string; ticket_id?: string } }>('/verification/nin-validation', {
++        nin,
++        validation_type: detail,
++        pin,
++      });
++      if (!result.status) throw new Error(result.message);
++      if (!result.data?.ticket_id) throw new Error('No ticket was returned - please contact support.');
++      setAsyncResult({ ticket_id: result.data.ticket_id, reference: result.data.reference });
++      setMessage("Request submitted. We'll check its status below - this is usually reviewed within a few minutes.");
++    } catch (error) {
++      setMessage(error instanceof ApiError ? error.message : error instanceof Error ? error.message : 'Request failed.');
++    } finally {
++      setBusy(false);
++    }
++  }
++
++  return (
++    <AppShell>
++      <div className="mx-auto max-w-4xl">
++        <div className="mt-1 flex items-center justify-between">
++          <PageHeader
++            title="Validation (Instant)"
++            subtitle="NIMC service used when a NIN becomes inactive, or when a Self-Service Portal modification hasn't reflected yet."
++          />
++        </div>
++        <button onClick={() => setShowInfo(true)} className="mt-3 flex items-center gap-1.5 font-body text-xs font-semibold text-gold-700">
++          <Info size={14} /> What is Validation?
++        </button>
++
++        <section className="mt-6 rounded-2xl border border-blue-400/50 bg-[#0b2f73] p-6">
++          {!asyncResult ? (
++            <form onSubmit={prepare}>
++              <StepLabel n={1}>Details Needed</StepLabel>
++              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
++                {DETAILS.map((d) => (
++                  <button
++                    key={d.value}
++                    type="button"
++                    onClick={() => setDetail(d.value)}
++                    className={`rounded-xl border p-4 text-center transition hover:-translate-y-0.5 ${
++                      detail === d.value ? 'border-[#8b6914] bg-[#6b4f0b] text-white shadow-md' : 'border-parchment-line bg-cream text-ink hover:border-gold-500'
++                    }`}
++                  >
++                    <span className="block text-sm font-semibold">{d.label}</span>
++                    <span className={`mt-1 block text-xs font-bold ${detail === d.value ? 'text-[#ffe9a3]' : 'text-gold-700'}`}>{money(prices[d.serviceKey])}</span>
++                  </button>
++                ))}
++              </div>
++
++              <StepLabel n={2}>Slip Type</StepLabel>
++              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
++                {SLIP_TYPES.map((s) => (
++                  <button
++                    key={s}
++                    type="button"
++                    onClick={() => setSlipType(s)}
++                    className={`rounded-xl border p-4 text-center transition hover:-translate-y-0.5 ${
++                      slipType === s ? 'border-[#8b6914] bg-[#6b4f0b] text-white shadow-md' : 'border-parchment-line bg-cream text-ink hover:border-gold-500'
++                    }`}
++                  >
++                    <span className="block text-sm font-semibold">{SLIP_LABEL[s]}</span>
++                    <span className={`mt-1 block text-xs font-bold ${slipType === s ? 'text-[#ffe9a3]' : 'text-gold-700'}`}>{s === 'no-slip' ? money(0) : 'Coming soon'}</span>
++                  </button>
++                ))}
++              </div>
++
++              <StepLabel n={3}>Supply ID Number</StepLabel>
++              <input
++                required
++                inputMode="numeric"
++                maxLength={11}
++                placeholder="NIN Number (11 digits)"
++                className="mt-3 w-full rounded-xl border border-parchment-line bg-cream p-3 text-ink outline-none focus:border-gold-500"
++                value={nin}
++                onChange={(e) => setNin(e.target.value)}
++              />
++              <p className="mt-1 font-body text-xs text-ink-600">Enter your 11-digit NIN (e.g., 12345678901)</p>
++
++              <ConsentCheckbox checked={consent} onChange={setConsent} />
++
++              <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
++                <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">Service cost: {money(price)}</span>
++                <button disabled={busy || !consent} className="flex items-center justify-center gap-2 rounded-xl bg-gold-500 px-6 py-3 font-display font-semibold text-ink disabled:opacity-60">
++                  {busy ? <Loader2 size={16} className="animate-spin" /> : 'Submit Verification'}
++                </button>
++              </div>
++              {message && <p className="mt-3 rounded-lg bg-cream p-3 font-body text-sm text-ink-600">{message}</p>}
++            </form>
++          ) : (
++            <AsyncResultView
++              ticket={asyncResult}
++              status={ticketStatus}
++              polling={polling}
++              message={message}
++              onRefresh={() => checkTicket(false)}
++              onDone={() => {
++                setAsyncResult(null);
++                setTicketStatus(null);
++                setMessage('');
++                setNin('');
++              }}
++            />
++          )}
++
++          <VerificationHistoryView history={history} loading={loadingHistory} />
++        </section>
++      </div>
++
++      {showInfo && (
++        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
++          <div className="w-full max-w-md rounded-2xl bg-white p-6 text-center shadow-2xl">
++            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border-2 border-gold-500 text-gold-700">
++              <Info size={22} />
++            </div>
++            <h3 className="mt-4 font-display text-lg font-bold text-ink">Warning</h3>
++            <p className="mt-3 font-body text-sm text-ink-600">
++              Validation is a NIMC service used when a NIN becomes inactive or stops working — most times showing the message "Record Not Found." This type of validation typically
++              takes up to 48 working hours to complete.
++            </p>
++            <p className="mt-3 font-body text-sm text-ink-600">
++              <b>NIN Modification Validation</b> is required when updates such as changes to name, date of birth, or phone number are made through the NIMC Self-Service Portal, but
++              the system still displays the old details. It usually takes up to 2 weeks (depending on NIMC network).
++            </p>
++            <button onClick={() => setShowInfo(false)} className="mt-5 w-full rounded-xl bg-gold-500 py-2.5 font-display font-semibold text-ink">
++              Close
++            </button>
++          </div>
++        </div>
++      )}
++
++      <PinConfirmDialog open={showPin} onClose={() => setShowPin(false)} onVerified={submit} />
++    </AppShell>
++  );
++}
+-- 
+2.43.0
+

@@ -165,7 +165,10 @@ export function createApp() {
   // and signature check exactly as before.
   app.use('/api/webhooks', express.raw({ type: '*/*' }), webhookRoutes);
 
-  app.use(express.json({ limit: '1mb' }));
+  // 8mb (was 1mb) so an admin can upload a scanned CAC certificate PDF as
+  // base64 through admin/cac.ts's manage page (base64 adds ~33% overhead on
+  // top of the original file size) without hitting this ceiling.
+  app.use(express.json({ limit: '8mb' }));
 
   app.use('/api/auth', authLimiter, authRoutes);
   app.use('/api/assistant', assistantRoutes);

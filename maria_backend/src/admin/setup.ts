@@ -14,6 +14,7 @@ import { registerUserWalletRoutes } from './user-wallet.js';
 import { registerCustomerActivityRoutes } from './customer-activity.js';
 import { registerNinModificationRoutes } from './nin-modification.js';
 import { registerBvnLicenseRoutes } from './bvn-license-onboarding.js';
+import { registerCacRoutes } from './cac.js';
 import { componentLoader, Components } from './component-loader.js';
 import { userResource } from './resources/user.resource.js';
 import { transactionResource } from './resources/transaction.resource.js';
@@ -176,6 +177,7 @@ export async function buildAdminRouter() {
   registerCustomerActivityRoutes(router);
   registerNinModificationRoutes(router);
   registerBvnLicenseRoutes(router);
+  registerCacRoutes(router);
   registerUserDeliveryRoutes(router);
 
   return { admin, router };

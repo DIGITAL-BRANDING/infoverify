@@ -65,7 +65,7 @@ export const transactionResource: ResourceWithOptions = {
           // other transaction type, where PENDING means "still in flight,
           // don't touch it", so this is the one type reverse() also allows
           // from PENDING.
-          if (status === 'PENDING') return ['NIN_MODIFICATION', 'BVN_LICENSE_ONBOARDING'].includes(record?.params?.type as string);
+          if (status === 'PENDING') return ['NIN_MODIFICATION', 'BVN_LICENSE_ONBOARDING', 'CAC_SERVICE_REQUEST'].includes(record?.params?.type as string);
           return status === 'SUCCESS' || status === 'FAILED';
         },
         handler: async (request, response, context) => {
@@ -240,6 +240,23 @@ export const transactionResource: ResourceWithOptions = {
         handler: async (_request, _response, context) => {
           const { record, currentAdmin } = context; if (!record) throw new Error('Missing record');
           return { record: record.toJSON(currentAdmin), redirectUrl: `/admin/bvn-license/${record.params.id as string}/pdf` };
+        }
+      },
+      // Opens the custom "manage" page (admin/cac.ts) where an admin can save
+      // a progress note and/or upload the finished certificate PDF, which
+      // marks the request SUCCESS. Unlike completeModification/
+      // completeBvnLicense above, this needs a real form (a note + a file),
+      // not a single confirm-guard click, hence the redirect to a dedicated
+      // page instead of an inline handler.
+      manageCacRequest: {
+        actionType: 'record', icon: 'Edit',
+        isAccessible: ({ currentAdmin, record }) => {
+          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
+          return !!admin && admin.role !== 'SUPPORT' && record?.params?.type === 'CAC_SERVICE_REQUEST';
+        },
+        handler: async (_request, _response, context) => {
+          const { record, currentAdmin } = context; if (!record) throw new Error('Missing record');
+          return { record: record.toJSON(currentAdmin), redirectUrl: `/admin/cac/${record.params.id as string}/manage` };
         }
       }
     }

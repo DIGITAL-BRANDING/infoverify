@@ -63,6 +63,14 @@ enum TransactionType {
   /// wallet at submission; the encrypted PDF is completed manually in
   /// Techhub by an authorised admin, or reversed to refund the wallet.
   BVN_LICENSE_ONBOARDING
+  /// A submitted CAC business registration request (Sole Proprietorship,
+  /// Partnership, Limited Liability, etc). There is no provider API for
+  /// this at all — the customer is debited at submission, an admin
+  /// registers the business by hand with CAC, optionally leaves progress
+  /// notes visible to the customer while it's in flight, and finally
+  /// uploads the completed certificate PDF, which marks the transaction
+  /// SUCCESS. See cac.service.ts.
+  CAC_SERVICE_REQUEST
   /// The credit-back entry refundWallet() creates - distinct from the
   /// original debit's own type (e.g. a reversed DATA_PURCHASE gets a REFUND
   /// entry, not a second DATA_PURCHASE). See relatedTransactionId above.
