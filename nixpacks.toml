@@ -4,15 +4,15 @@ nixPkgs = ["nodejs_22"]
 
 [phases.install]
 cmds = [
-  "cd major_data_link_backend && NPM_CONFIG_PRODUCTION=false npm ci --cache /tmp/.npm --no-audit --no-fund",
+  "cd maria_backend && NPM_CONFIG_PRODUCTION=false npm ci --cache /tmp/.npm --no-audit --no-fund",
   "cd web && NPM_CONFIG_PRODUCTION=false npm ci --cache /tmp/.npm --no-audit --no-fund"
 ]
 
 [phases.build]
 cmds = [
-  "cd major_data_link_backend && npm run prisma:generate",
-  "cd major_data_link_backend && npm run build",
+  "cd maria_backend && npm run prisma:generate",
+  "cd maria_backend && npm run build",
   "cd web && npm run build",
-  "rm -rf major_data_link_backend/public/app && mkdir -p major_data_link_backend/public/app",
-  "cp -r web/dist/. major_data_link_backend/public/app/"
+  "rm -rf maria_backend/public/app && mkdir -p maria_backend/public/app",
+  "cp -r web/dist/. maria_backend/public/app/"
 ]
