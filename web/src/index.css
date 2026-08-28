@@ -248,3 +248,12 @@ main [class*="bg-\\#0b2f73"] h1, main [class*="bg-\\#0b2f73"] h2, main [class*="
 main#home .bg-white { background-color: #ffffff !important; background-image: none !important; color: #1e293b !important; border-color: #e2e8f0 !important; }
 main#home .bg-white * { color: inherit; }
 main#home .bg-slate-50, main#home .bg-slate-100 { background-color: #f8fafc !important; background-image: none !important; }
+/* Landing service tiles use the same royal-blue treatment as the app dashboard. */
+main#home #services .bg-white {
+  background: linear-gradient(145deg, #0b2f73, #0d438d 60%, #071d4d) !important;
+  border-color: #3b73c5 !important;
+  color: #ffffff !important;
+}
+main#home #services .bg-white h3,
+main#home #services .bg-white p,
+main#home #services .bg-white span { color: #ffffff !important; }
