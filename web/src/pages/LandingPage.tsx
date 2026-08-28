@@ -306,17 +306,17 @@ export default function MariaLandingPage() {
             {vtuServices.map((service, index) => {
               const IconComp = service.icon;
               return (
-                <div key={index} className="bg-white p-6 rounded-2xl border border-slate-200 hover:shadow-xl transition-all duration-300 space-y-4 group flex flex-col justify-between">
+                <div key={index} className="bg-[#0b2f73] text-white p-6 rounded-2xl border border-blue-400/50 shadow-lg hover:shadow-xl transition-all duration-300 space-y-4 group flex flex-col justify-between">
                   <div className="space-y-4">
                     <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-[#0A192F] group-hover:bg-[#0A192F] group-hover:text-[#D4AF37] transition-colors">
                       <IconComp className="w-6 h-6" />
                     </div>
-                    <h3 className="text-xl font-bold text-[#0A192F]">{service.title}</h3>
-                    <p className="text-slate-600 text-xs leading-relaxed">{service.desc}</p>
+                    <h3 className="text-xl font-bold text-white">{service.title}</h3>
+                    <p className="text-blue-100 text-xs leading-relaxed">{service.desc}</p>
                   </div>
                   
                   <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-                    <span className="text-xs font-bold text-[#D4AF37]">{service.priceTag}</span>
+                    <span className="text-xs font-bold text-white">{service.priceTag}</span>
                     <a href="#contact" className="text-[#0A192F] group-hover:text-[#D4AF37] transition-colors">
                       <ArrowRight className="w-4 h-4" />
                     </a>
