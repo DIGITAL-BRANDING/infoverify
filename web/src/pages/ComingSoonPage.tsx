@@ -1,11 +1,12 @@
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Smartphone, MessageCircle } from 'lucide-react';
+import { ArrowLeft, MessageCircle } from 'lucide-react';
 import AppShell from '../components/AppShell';
 import { TINT_CLASSES, type ServiceItem } from '../lib/services';
-import { CONTACT, whatsappLink } from '../lib/contact';
+import { whatsappLink } from '../lib/contact';
 
 export default function ComingSoonPage({ service }: { service: ServiceItem }) {
   const Icon = service.icon;
+  const iconAsset = service.route === '/bvn-crm' ? '/branding/BVN CRM.png' : null;
   const tint = TINT_CLASSES[service.tint];
 
   return (
@@ -19,19 +20,14 @@ export default function ComingSoonPage({ service }: { service: ServiceItem }) {
 
       <div className="mt-8 flex flex-col items-center rounded-2xl border border-parchment-line bg-parchment px-6 py-14 text-center">
         <div className={`flex h-16 w-16 items-center justify-center rounded-2xl ${tint.bg} ${tint.text}`}>
-          <Icon size={28} />
+          {iconAsset ? <img src={iconAsset} alt="" className="h-full w-full rounded-2xl object-contain" /> : <Icon size={28} />}
         </div>
         <h1 className="mt-5 font-display text-xl font-bold text-ink">{service.label}</h1>
         <p className="mt-2 max-w-sm font-body text-sm text-ink-600">{service.description}</p>
 
-        <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-gold-500/40 bg-gold-50 px-4 py-1.5 font-body text-xs font-semibold text-gold-700">
-          Coming soon to the website
+        <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-blue-300 bg-blue-100 px-4 py-1.5 font-body text-xs font-semibold text-blue-700">
+          Under Development
         </div>
-
-        <p className="mt-6 max-w-sm font-body text-sm text-ink-600">
-          This one's ready right now in the MARIA Digital Solutions mobile app — download it to use{' '}
-          {service.label} today. We're bringing it to the website next.
-        </p>
 
         <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
           <a
@@ -43,9 +39,6 @@ export default function ComingSoonPage({ service }: { service: ServiceItem }) {
             <MessageCircle size={15} className="text-gold-500" />
             Ask us on WhatsApp
           </a>
-          <span className="inline-flex items-center gap-2 font-body text-xs text-ink-600">
-            <Smartphone size={14} /> or use the app — {CONTACT.whatsapp}
-          </span>
         </div>
       </div>
     </AppShell>

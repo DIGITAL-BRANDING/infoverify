@@ -143,7 +143,7 @@ export default function MariaLandingPage() {
               Fastest Digital <span className="text-[#D4AF37]">Solutions</span> in Africa
             </h1>
             <p className="text-slate-300 text-lg leading-relaxed max-w-xl">
-              Experience lightning-fast transactions for airtime, data, bills, and subscriptions with Maria Integrity Enterprise.
+              Experience lightning-fast transactions for airtime, data, bills, subscriptions, BVN Verifications, BVN Modifications and BVN License Creation with Maria Integrity Enterprise.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 pt-2">
               <Link 
@@ -201,6 +201,20 @@ export default function MariaLandingPage() {
 
               {/* Animated Transaction Rows */}
               <div className="space-y-3">
+                {/* BVN Services Row */}
+                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100 transform hover:-translate-y-0.5 transition-all">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                      <Smartphone className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-[#0A192F]">BVN Services</p>
+                      <p className="text-[10px] text-slate-500">Update BVN Information</p>
+                      <p className="text-[10px] text-slate-400">Completed in 24Hrs - 3 Working Days</p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">₦6,000 - ₦10,000 </span>
+                </div>
                 {/* Airtime Row */}
                 <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100 transform hover:-translate-y-0.5 transition-all">
                   <div className="flex items-center gap-3">

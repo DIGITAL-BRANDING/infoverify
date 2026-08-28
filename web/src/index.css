@@ -244,3 +244,7 @@ main [class*="bg-parchment"] .text-ink, main [class*="bg-parchment"] .text-ink-6
 main [class*="bg-cream"] .text-ink, main [class*="bg-cream"] .text-ink-600 { color: #ffffff !important; }
 main [class*="bg-\\#0A192F"] h1, main [class*="bg-\\#0A192F"] h2, main [class*="bg-\\#0A192F"] h3,
 main [class*="bg-\\#0b2f73"] h1, main [class*="bg-\\#0b2f73"] h2, main [class*="bg-\\#0b2f73"] h3 { color: #ffffff !important; }
+/* The public landing page intentionally keeps its light SLT-style cards. */
+main#home .bg-white { background-color: #ffffff !important; background-image: none !important; color: #1e293b !important; border-color: #e2e8f0 !important; }
+main#home .bg-white * { color: inherit; }
+main#home .bg-slate-50, main#home .bg-slate-100 { background-color: #f8fafc !important; background-image: none !important; }
