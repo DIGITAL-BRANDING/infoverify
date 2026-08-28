@@ -3,7 +3,10 @@ import { ComponentLoader } from 'adminjs';
 export const componentLoader = new ComponentLoader();
 
 export const Components = {
-  // Keep the source extension here: the dev server runs TypeScript through
-  // tsx, while AdminJS resolves the path relative to this loader file.
-  Dashboard: componentLoader.add('Dashboard', './components/dashboard.tsx')
+  // AdminJS resolves relative to the compiled loader in production. The
+  // TypeScript source is used only by the tsx development runner.
+  Dashboard: componentLoader.add(
+    'Dashboard',
+    process.env.NODE_ENV === 'production' ? './components/dashboard.js' : './components/dashboard.tsx'
+  )
 };
