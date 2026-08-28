@@ -4,14 +4,14 @@
 export const CONTACT = {
   whatsapp: '+2348037289774',
   phoneAlt: '07025859543',
-  whatsappChannelUrl: 'https://whatsapp.com/channel/0029Vb8KzHy5PO0stgnsNy0l',
+  whatsappChannelUrl: 'https://chat.whatsapp.com/BzqJHqki8vE7TnfpVIz5WZ?s=cl&p=a&ilr=0',
+  whatsappGroupUrl: 'https://chat.whatsapp.com/BzqJHqki8vE7TnfpVIz5WZ?s=cl&p=a&ilr=0',
   email: 'kindnesscomp20@gmail.com',
   emailDisplay: 'kindnesscomp20@gmail.com / sunusiusama94@gmail.com',
 };
 
 export function whatsappLink(text: string) {
-  const digits = CONTACT.whatsapp.replace('+', '');
-  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+  return CONTACT.whatsappGroupUrl;
 }
 
 // GitHub's "latest release" download URL is stable forever — it always
