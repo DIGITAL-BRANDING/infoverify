@@ -281,7 +281,7 @@ export default function VerificationPage({ mode }: { mode: Mode }) {
           ← {selected ? 'All services' : 'Dashboard'}
         </button>
 
-        <header className="mt-5 rounded-2xl border border-parchment-line bg-parchment p-6">
+        <header className="mt-5 rounded-2xl border border-blue-400/50 bg-[#0b2f73] p-6">
           <p className="font-body text-sm font-semibold text-gold-700">Identity services</p>
           <h1 className="mt-1 font-display text-3xl font-bold text-ink">{mode === 'nin' ? 'NIN Services' : 'BVN Services'}</h1>
           <p className="mt-2 font-body text-sm text-ink-600">
@@ -323,7 +323,7 @@ export default function VerificationPage({ mode }: { mode: Mode }) {
             })}
           </section>
         ) : (
-          <section className="mt-6 rounded-2xl border border-parchment-line bg-parchment p-6">
+          <section className="mt-6 rounded-2xl border border-blue-400/50 bg-[#0b2f73] p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="font-display text-xl font-bold text-ink">{selected.label}</h2>
               <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">

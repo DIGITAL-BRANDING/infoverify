@@ -2,9 +2,9 @@
 
 @theme {
   /* Brand: Gold / Bronze / Ember - matches the Flutter app's identity */
-  --color-ink: #15100a;
-  --color-ink-soft: #221a10;
-  --color-ink-line: #3a2c16;
+  --color-ink: #071a3d;
+  --color-ink-soft: #0d2a63;
+  --color-ink-line: #1d4287;
 
   --color-cream: #fffaf0;
   --color-parchment: #fbf0d9;
@@ -13,7 +13,7 @@
   --color-gold-50: #fffbeb;
   --color-gold-200: #fce588;
   --color-gold-400: #f7c948;
-  --color-gold-500: #d4af37;
+  --color-gold-500: #d7ad38;
   --color-gold-600: #b8941f;
   --color-gold-700: #9c7a17;
 
@@ -49,7 +49,7 @@ html { scroll-behavior: smooth; }
 body {
   margin: 0;
   font-family: var(--font-body);
-  background: var(--color-cream);
+  background: #f4f7fc;
   color: var(--color-ink-900);
   -webkit-font-smoothing: antialiased;
 }
@@ -76,22 +76,47 @@ select:focus-visible, textarea:focus-visible {
 }
 .ticker-track { animation: ticker-scroll 32s linear infinite; }
 .ticker-row:hover .ticker-track { animation-play-state: paused; }
+.dashboard-overview { animation: dashboard-float 5s ease-in-out infinite; }
+@keyframes dashboard-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
 .service-tile {
   isolation: isolate;
-  border: 1px solid rgba(244, 194, 58, .52);
+  border: 1px solid rgba(96, 165, 250, .35);
   background:
-    radial-gradient(circle at 82% 12%, rgba(255, 207, 65, .30), transparent 25%),
-    radial-gradient(circle at 12% 105%, rgba(231, 161, 20, .23), transparent 34%),
-    linear-gradient(135deg, #100b04 0%, #261707 48%, #0d0a06 100%);
+    linear-gradient(145deg, #0b2f73 0%, #0e438f 55%, #071d4d 100%);
   box-shadow: inset 0 1px 0 rgba(255, 237, 169, .18), 0 8px 20px rgba(54, 31, 0, .22);
 }
+
+/* Final service-page theme override: keep every service surface royal blue. */
+main .bg-parchment,
+main .bg-cream,
+main .bg-white.rounded-xl,
+main .bg-white.rounded-2xl,
+main .border-parchment-line {
+  background-color: #0b2f73 !important;
+  background-image: linear-gradient(145deg, #0b2f73 0%, #0d438d 58%, #071d4d 100%) !important;
+  border-color: rgba(96,165,250,.5) !important;
+  color: #f8fbff !important;
+}
+main .bg-parchment *, main .bg-cream *, main .bg-white.rounded-xl *, main .bg-white.rounded-2xl * { color: #f8fbff; }
+main input, main select, main textarea { background-color: #071d4d !important; color: #fff !important; border-color: #3b73c5 !important; }
+main .bg-gold-500 { background-color: #2563eb !important; color: #fff !important; }
+
+/* Service pages use the same royal-blue premium surface as the dashboard. */
+main .bg-white.rounded-xl, main .bg-white.rounded-2xl,
+main .bg-cream.rounded-xl.border, main .bg-cream.rounded-2xl.border {
+  background: linear-gradient(145deg, #0b2f73, #0d438d 60%, #071d4d) !important;
+  border-color: rgba(96,165,250,.45) !important;
+  color: #f8fbff !important;
+}
+main .bg-white.rounded-xl h1, main .bg-white.rounded-xl h2, main .bg-white.rounded-xl h3,
+main .bg-white.rounded-2xl h1, main .bg-white.rounded-2xl h2, main .bg-white.rounded-2xl h3 { color: #fff !important; }
 .service-tile::before {
   content: "";
   position: absolute;
   inset: 0;
   z-index: -1;
   opacity: .34;
-  background-image: radial-gradient(circle, #f5bd28 1.3px, transparent 1.8px);
+  background-image: radial-gradient(circle, #60a5fa 1.3px, transparent 1.8px);
   background-size: 15px 15px;
   background-position: -5px -5px;
   mask-image: linear-gradient(120deg, #000 0%, transparent 54%);
@@ -101,23 +126,25 @@ select:focus-visible, textarea:focus-visible {
   position: absolute;
   inset: auto -24% 7px;
   height: 1px;
-  background: linear-gradient(90deg, transparent, #ffcb3e, transparent);
+  background: linear-gradient(90deg, transparent, #60a5fa, transparent);
   opacity: .78;
 }
 .service-tile:hover {
-  border-color: #ffe080;
+  border-color: #60a5fa;
   box-shadow: inset 0 1px 0 rgba(255, 247, 205, .4), 0 12px 27px rgba(131, 78, 0, .42), 0 0 22px rgba(235, 175, 34, .20);
 }
 .service-tile-icon {
-  border: 1px solid rgba(255, 225, 131, .52);
-  background-color: rgba(255, 243, 205, .94) !important;
+  border: 6px solid #dbeafe;
+  border-radius: 9999px !important;
+  background-color: #61c39a !important;
+  color: #ffffff !important;
   box-shadow: 0 4px 12px rgba(0, 0, 0, .35), inset 0 1px 0 #fffdf4;
 }
 .premium-sidebar {
-  border-right: 1px solid rgba(244, 194, 58, .42);
+  border-right: 1px solid rgba(96, 165, 250, .35);
   background:
     radial-gradient(circle at 85% 8%, rgba(244, 187, 36, .18), transparent 25%),
-    linear-gradient(155deg, #0a0805 0%, #211505 50%, #0b0906 100%);
+    linear-gradient(155deg, #061637 0%, #0b2b68 50%, #061331 100%);
   box-shadow: inset -1px 0 rgba(255, 231, 145, .08), 8px 0 24px rgba(28, 16, 0, .18);
 }
 .premium-sidebar .logo-mark { filter: drop-shadow(0 0 7px rgba(255, 199, 52, .28)); }
@@ -195,3 +222,25 @@ main .rounded-xl.border-parchment-line.bg-parchment:hover {
 @media (prefers-reduced-motion: reduce) {
   .ticker-track { animation: none; }
 }
+
+/* Final royal-blue override for every authenticated service surface. */
+main .bg-white.rounded-xl, main .bg-white.rounded-2xl,
+main .bg-cream.rounded-xl.border, main .bg-cream.rounded-2xl.border,
+main .rounded-xl.border-parchment-line.bg-parchment,
+main .rounded-2xl.border-parchment-line.bg-parchment {
+  background: linear-gradient(145deg, #0b2f73, #0d438d 60%, #071d4d) !important;
+  border-color: #3b73c5 !important;
+  color: #ffffff !important;
+}
+main .bg-white.rounded-xl h1, main .bg-white.rounded-xl h2, main .bg-white.rounded-xl h3,
+main .bg-white.rounded-2xl h1, main .bg-white.rounded-2xl h2, main .bg-white.rounded-2xl h3,
+main .rounded-xl.border-parchment-line.bg-parchment h1, main .rounded-xl.border-parchment-line.bg-parchment h2,
+main .rounded-2xl.border-parchment-line.bg-parchment h1, main .rounded-2xl.border-parchment-line.bg-parchment h2 { color: #ffffff !important; }
+main input, main select, main textarea { background: #071d4d !important; color: #ffffff !important; border-color: #5b8ed8 !important; }
+main [class~="bg-cream"], main [class~="bg-parchment"] { background: #0b2f73 !important; color: #ffffff !important; border-color: #3b73c5 !important; }
+main [class*="bg-\\[\\#6b4f0b\\]"] { background: #1452a0 !important; }
+main button[class*="bg-cream"], main button[class*="bg-parchment"], main button[class*="bg-\\#6b4f0b"] { background: #1452a0 !important; color: #ffffff !important; border-color: #5b8ed8 !important; }
+main [class*="bg-parchment"] .text-ink, main [class*="bg-parchment"] .text-ink-600,
+main [class*="bg-cream"] .text-ink, main [class*="bg-cream"] .text-ink-600 { color: #ffffff !important; }
+main [class*="bg-\\#0A192F"] h1, main [class*="bg-\\#0A192F"] h2, main [class*="bg-\\#0A192F"] h3,
+main [class*="bg-\\#0b2f73"] h1, main [class*="bg-\\#0b2f73"] h2, main [class*="bg-\\#0b2f73"] h3 { color: #ffffff !important; }

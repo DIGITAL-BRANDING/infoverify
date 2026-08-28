@@ -62,8 +62,16 @@ export default function App() {
           <Route path="/neco-result" element={<ProtectedRoute><ResultPinPage exam="NECO" /></ProtectedRoute>} />
           <Route path="/nabteb-result" element={<ProtectedRoute><ResultPinPage exam="NABTEB" /></ProtectedRoute>} />
           <Route path="/nin-services" element={<ProtectedRoute><VerificationPage mode="nin" /></ProtectedRoute>} />
+          <Route path="/nin" element={<ProtectedRoute><VerificationPage mode="nin" /></ProtectedRoute>} />
           <Route path="/nin-modification" element={<ProtectedRoute><NinModificationPage /></ProtectedRoute>} />
           <Route path="/bvn-services" element={<ProtectedRoute><VerificationPage mode="bvn" /></ProtectedRoute>} />
+          <Route path="/bvn" element={<ProtectedRoute><VerificationPage mode="bvn" /></ProtectedRoute>} />
+          <Route path="/modification" element={<ProtectedRoute><NinModificationPage /></ProtectedRoute>} />
+          <Route path="/validation" element={<ProtectedRoute><VerificationPage mode="nin" /></ProtectedRoute>} />
+          <Route path="/tracking" element={<ProtectedRoute><VerificationPage mode="nin" /></ProtectedRoute>} />
+          <Route path="/delink" element={<ProtectedRoute><VerificationPage mode="nin" /></ProtectedRoute>} />
+          <Route path="/ipe" element={<ProtectedRoute><VerificationPage mode="nin" /></ProtectedRoute>} />
+          <Route path="/bvn-ret" element={<ProtectedRoute><VerificationPage mode="bvn" /></ProtectedRoute>} />
           <Route path="/terms" element={<PrivacyRedirect page="terms" />} />
           <Route path="/fund-wallet" element={<ProtectedRoute><FundWalletPage /></ProtectedRoute>} />
           <Route path="/deliveries" element={<ProtectedRoute><DeliveriesPage /></ProtectedRoute>} />

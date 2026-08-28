@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
-import { Bell, ChevronDown, Fingerprint, IdCard, LayoutDashboard, LogOut, Menu, PackageOpen, ReceiptText, Smartphone, WalletCards, Wifi, X, Users } from 'lucide-react';
+import { Bell, LayoutDashboard, LogOut, Menu, Smartphone, X, IdCard, Phone, BriefcaseBusiness, Fingerprint, ShieldCheck, CheckCircle2, MapPin, Search, Unlink, FilePenLine, Baby, Receipt, Newspaper, History, WalletCards } from 'lucide-react';
 import Logo from './Logo';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
@@ -8,18 +8,13 @@ import MajorAssistant from './MajorAssistant';
 import NotificationPopup from './NotificationPopup';
 
 type Notice = { id: string; title: string; body: string; is_read: boolean; created_at: string };
-const groups = [
-  { label: 'VTU Services', icon: Wifi, items: [['Buy Data', '/buy-data'], ['Buy Airtime', '/buy-airtime']] },
-  { label: 'NIN Services', icon: IdCard, items: [['All NIN Services', '/nin-services']] },
-  { label: 'BVN Services', icon: Fingerprint, items: [['All BVN Services', '/bvn-services']] },
-  { label: 'Result Checkers', icon: ReceiptText, items: [['WAEC / NECO / NABTEB', '/result-checkers']] },
-  { label: 'My Deliveries', icon: PackageOpen, items: [['Download my files', '/deliveries']] },
+const items = [
+ ['Dashboard','/dashboard',LayoutDashboard],['NIN_Phone Verification','/nin',IdCard],['Phone Multiple','/phone',Phone],['CAC Services','/cac',BriefcaseBusiness],['BVN Verification','/bvn',Fingerprint],['IPE Clerance (Instant)','/ipe',ShieldCheck],['Validation','/validation',CheckCircle2],['Personalization','/tracking',MapPin],['BVN Retrieval','/bvn-ret',Search],['Self Service Unlink','/delink',Unlink],['NIN Modifications','/modification',FilePenLine],['Birth Attestation','/attestation',Baby],['TIN Certificate','/tin',Receipt],['Newspaper Publication','/newspaper',Newspaper],['Demographic Search','/demo',Search],['Slips History','/verifications',History],['Wallet Summary','/history',WalletCards],
 ] as const;
 
 function Sidebar({ close }: { close?: () => void }) {
-  const { logout } = useAuth(); const nav = useNavigate(); const [open, setOpen] = useState('VTU Services');
-  const go = (to: string) => { close?.(); nav(to); };
-  return <aside className="premium-sidebar flex h-full w-64 flex-col px-3 py-5"><Link to="/dashboard" onClick={close} className="mb-8 px-3"><Logo /></Link><nav className="flex-1 space-y-1"><NavLink to="/dashboard" onClick={close} className={({isActive}) => `premium-nav-link flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold ${isActive ? 'is-active' : ''}`}><LayoutDashboard size={18}/>Dashboard</NavLink><NavLink to="/fund-wallet" onClick={close} className={({isActive}) => `premium-nav-link flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold ${isActive ? 'is-active' : ''}`}><WalletCards size={18}/>Fund Wallet</NavLink><NavLink to="/referrals" onClick={close} className={({isActive}) => `premium-nav-link flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold ${isActive ? 'is-active' : ''}`}><Users size={18}/>Referrals</NavLink>{groups.map(({label, icon: Icon, items}) => <div key={label}><button onClick={() => setOpen(open === label ? '' : label)} className="premium-nav-link flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold"><Icon size={18}/><span className="flex-1 text-left">{label}</span><ChevronDown size={16} className={open === label ? 'rotate-180' : ''}/></button>{open === label && <div className="premium-subnav ml-6 border-l pl-3">{items.map(([label, to]) => <button key={to} onClick={() => go(to)} className="block w-full rounded-lg px-3 py-2 text-left text-xs">{label}</button>)}</div>}</div>)}</nav><button onClick={() => { logout(); close?.(); nav('/login'); }} className="premium-logout flex items-center gap-3 px-3 py-4 text-sm font-semibold"><LogOut size={18}/>Logout</button></aside>;
+  const { logout } = useAuth(); const nav = useNavigate();
+  return <aside className="premium-sidebar flex h-full w-64 flex-col px-3 py-5"><Link to="/dashboard" onClick={close} className="mb-8 px-3"><Logo dark /></Link><nav className="flex-1 space-y-1 overflow-y-auto">{items.map(([label,to,Icon]) => <NavLink key={to} to={to} onClick={close} className={({isActive}) => `premium-nav-link flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold ${isActive ? 'is-active' : ''}`}><Icon size={17}/>{label}</NavLink>)}</nav><button onClick={() => { logout(); close?.(); nav('/login'); }} className="premium-logout flex items-center gap-3 px-3 py-4 text-sm font-semibold"><LogOut size={18}/>Logout</button></aside>;
 }
 
 function NotificationBell() {

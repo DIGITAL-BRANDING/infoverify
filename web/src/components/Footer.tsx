@@ -35,7 +35,7 @@ export default function Footer() {
             <ul className="mt-4 space-y-3 font-body text-sm text-cream/70">
               <li>
                 <a
-                  href={whatsappLink('Hello MAJOR DATA-LINK, I need help')}
+                  href={whatsappLink('Hello MARIA Digital Solutions, I need help')}
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-center gap-2 hover:text-cream"
@@ -69,10 +69,11 @@ export default function Footer() {
         </div>
 
         <div className="mt-12 flex flex-col items-center justify-between gap-3 border-t border-ink-line pt-6 font-body text-xs text-cream/40 sm:flex-row">
-          <p>© {new Date().getFullYear()} MAJOR DATA-LINK. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} MARIA Digital Solutions. All rights reserved.</p>
           <p>Kindness Digital Branding and IT Solutions</p>
         </div>
       </div>
     </footer>
   );
 }
+

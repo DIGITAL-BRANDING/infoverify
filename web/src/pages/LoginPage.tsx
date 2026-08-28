@@ -36,15 +36,15 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-cream px-5 py-12">
+    <div className="flex min-h-screen items-center justify-center bg-[#f1f3f6] px-5 py-12">
       <div className="w-full max-w-sm">
         <Link to="/" className="mb-8 flex justify-center">
           <Logo />
         </Link>
 
-        <div className="rounded-2xl border border-parchment-line bg-parchment p-7">
+        <div className="rounded-lg border border-slate-200 bg-white p-7 shadow-md">
           <h1 className="font-display text-xl font-bold text-ink">
-            {needsPin ? 'Enter your login PIN' : 'Welcome back'}
+            {needsPin ? 'Enter your login PIN' : 'Log-In To Your Account'}
           </h1>
           <p className="mt-1 font-body text-sm text-ink-600">
             {needsPin

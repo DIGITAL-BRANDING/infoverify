@@ -1,608 +1,468 @@
-import { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import {
-  Wallet,
-  MousePointerClick,
-  PackageCheck,
-  Download,
-  Lock,
-  Landmark,
-  MessageCircle,
-  ChevronDown,
-  GraduationCap,
-  BookOpenCheck,
-  BookOpen,
-  IdCard,
-  Fingerprint,
-  Phone,
-  UserRoundCheck,
-  SearchCheck,
-  ShieldCheck,
+import { 
+  Phone, 
+  Mail, 
+  MapPin, 
+  Menu, 
+  X, 
+  ChevronRight, 
+  ShieldCheck, 
+  Globe, 
+  TrendingUp, 
+  Users, 
   ArrowRight,
+  Smartphone,
+  Wifi,
+  Zap,
+  Tv,
+  CheckCircle2,
+  Lock,
+  Headphones
 } from 'lucide-react';
-import PublicNav from '../components/PublicNav';
-import RatesTicker from '../components/RatesTicker';
-import Footer from '../components/Footer';
-import { api } from '../lib/api';
-import { CONTACT, whatsappLink, ANDROID_APK_URL } from '../lib/contact';
-import { SERVICES as ALL_SERVICES, TINT_CLASSES } from '../lib/services';
 
-const STEPS = [
-  {
-    icon: Wallet,
-    title: 'Fund your wallet',
-    desc: 'Transfer once to your dedicated account number — funds reflect in seconds.',
-  },
-  {
-    icon: MousePointerClick,
-    title: 'Pick a service',
-    desc: 'Airtime, data, cable, electricity or verification — choose and confirm.',
-  },
-  {
-    icon: PackageCheck,
-    title: 'Delivered instantly',
-    desc: 'No waiting, no manual approval. Your top-up lands immediately.',
-  },
-];
+export default function MariaLandingPage() {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-const TRUST_POINTS = [
-  {
-    icon: Lock,
-    title: 'Encrypted at rest',
-    desc: 'Sensitive identity data (NIN/BVN) is encrypted in our database, not stored in plain text.',
-  },
-  {
-    icon: Landmark,
-    title: 'Bank-backed funding',
-    desc: 'Wallet funding runs through a licensed payment processor, straight to your dedicated account number.',
-  },
-  {
-    icon: MessageCircle,
-    title: 'Real support, on WhatsApp',
-    desc: `Reach an actual person any time at ${CONTACT.whatsapp} — no ticket queues.`,
-  },
-];
-
-const FAQS = [
-  {
-    q: 'How do I fund my wallet?',
-    a: 'After you register, you get a dedicated account number. Transfer any amount to it from any Nigerian bank and your wallet updates automatically — usually within seconds.',
-  },
-  {
-    q: 'How fast is delivery?',
-    a: "Airtime, data, NIN/BVN slips, and result checker pins are delivered instantly after payment — there's no manual approval step on our side.",
-  },
-  {
-    q: 'Is my money — and my identity data — safe?',
-    a: 'Your wallet is funded through a licensed payment processor via a dedicated bank account in your name, and any NIN/BVN data you submit is encrypted in our database.',
-  },
-  {
-    q: 'What if a transaction fails?',
-    a: "If a purchase can't be completed, your wallet is automatically refunded — you can see this reflected instantly in your transaction history.",
-  },
-  {
-    q: "The app isn't on the Play Store yet — how do I install it?",
-    a: "Download the APK below, then open it. Android will ask you to allow installs from this source the first time — tap Settings, turn on 'Allow from this source', then go back and tap install. This warning is standard for any app installed outside the Play Store, not a sign anything is wrong.",
-  },
-  {
-    q: "I'm stuck — how do I reach support?",
-    a: `Message us directly on WhatsApp at ${CONTACT.whatsapp}, or email ${CONTACT.emailDisplay}. A real person responds.`,
-  },
-];
-
-type PriceRow = { service: string; label: string; unit_price: number };
-
-const RESULT_ICON: Record<string, typeof GraduationCap> = {
-  WAEC_PIN: GraduationCap,
-  NECO_PIN: BookOpenCheck,
-  NABTEB_PIN: BookOpen,
-};
-
-// Curated view of the 15 individual ServicePricing rows the backend prices
-// NIN/BVN by (see major_data_link_backend/src/services/verification.service.ts).
-// Tiers (Premium/Standard/Regular/VNIN for NIN slips, Premium/Standard for
-// BVN slips) currently all share one Techhub cost, so showing all of them
-// as separate cards would just repeat the same price four times — this
-// picks one representative service key per real product family instead,
-// same grouping web/src/pages/VerificationPage.tsx uses for its own tabs.
-const NIN_SERVICES = [
-  {
-    icon: IdCard,
-    label: 'NIN Verification',
-    desc: 'Print a NIN slip by NIN number.',
-    note: 'Premium, Standard, Regular & VNIN',
-    service: 'NIN_SLIP_STANDARD',
-  },
-  {
-    icon: Phone,
-    label: 'NIN by Phone',
-    desc: 'Look up a NIN slip with a registered phone number.',
-    note: 'Premium, Standard & Regular',
-    service: 'NIN_PHONE_SLIP_STANDARD',
-  },
-  {
-    icon: UserRoundCheck,
-    label: 'NIN Demographic',
-    desc: 'Verify by full name, date of birth & gender.',
-    service: 'NIN_DEMOGRAPHIC',
-  },
-  {
-    icon: SearchCheck,
-    label: 'NIN Validation / Modification',
-    desc: 'Validate a NIN or request a correction.',
-    service: 'NIN_VALIDATION',
-  },
-  {
-    icon: UserRoundCheck,
-    label: 'NIN Personalization',
-    desc: 'Finish personalization with a tracking ID.',
-    service: 'NIN_PERSONALIZATION',
-  },
-  {
-    icon: ShieldCheck,
-    label: 'Self-Service Delinking',
-    desc: 'Unlink a phone number or email from your NIN.',
-    service: 'NIN_DELINKING',
-  },
-  {
-    icon: ShieldCheck,
-    label: 'IPE Clearance',
-    desc: 'Clear an In-Person Enrolment tracking ID.',
-    service: 'IPE_CLEARANCE',
-  },
-];
-
-const BVN_SERVICES = [
-  {
-    icon: Fingerprint,
-    label: 'BVN Verification',
-    desc: 'Print a BVN slip in seconds.',
-    note: 'Premium & Standard',
-    service: 'BVN_SLIP_STANDARD',
-  },
-  {
-    icon: Phone,
-    label: 'BVN Retrieval',
-    desc: 'Recover a BVN using name & phone number.',
-    service: 'BVN_RETRIEVAL',
-  },
-];
-
-export default function LandingPage() {
-  const [resultPrices, setResultPrices] = useState<PriceRow[] | null>(null);
-  const [verificationPrices, setVerificationPrices] = useState<Record<string, number> | null>(null);
-
-  useEffect(() => {
-    api
-      .get<{ status: boolean; data: PriceRow[] }>('/public/result-prices', false)
-      .then((res) => setResultPrices(res.data ?? []))
-      .catch(() => setResultPrices([]));
-
-    api
-      .get<{ status: boolean; data: PriceRow[] }>('/public/verification-prices', false)
-      .then((res) => {
-        const map: Record<string, number> = {};
-        for (const row of res.data ?? []) map[row.service] = row.unit_price;
-        setVerificationPrices(map);
-      })
-      .catch(() => setVerificationPrices({}));
-
-  }, []);
+  // Dynamic VTU Services array based on screenshots while preserving branding
+  const vtuServices = [
+    {
+      title: "Airtime Top-up",
+      desc: "Instant recharge for MTN, Glo, Airtel, 9mobile at best rates",
+      priceTag: "From ₦50",
+      icon: Smartphone
+    },
+    {
+      title: "Data Plans",
+      desc: "Affordable data bundles for all networks, daily/weekly/monthly",
+      priceTag: "From ₦100",
+      icon: Wifi
+    },
+    {
+      title: "Electricity Bills",
+      desc: "Pay prepaid/postpaid bills for all Nigerian discos instantly",
+      priceTag: "All Discos",
+      icon: Zap
+    },
+    {
+      title: "Cable TV",
+      desc: "DSTV, GOTV, Startimes subscriptions with instant activation",
+      priceTag: "All Packages",
+      icon: Tv
+    }
+  ];
 
   return (
-    <div className="min-h-screen bg-cream">
-      <PublicNav />
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
+      {/* Top Bar Header */}
+      <div className="bg-[#0A192F] text-white text-sm py-2.5 px-4 sm:px-8 border-b border-amber-500/30">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-2">
+          <div className="flex flex-wrap items-center gap-6 text-xs sm:text-sm">
+            <a href="tel:+2348000000000" className="flex items-center gap-2 hover:text-amber-400 transition-colors">
+              <Phone className="w-4 h-4 text-amber-400" />
+              <span>+234 703 424 8143</span>
+            </a>
+            <a href="mailto:info@maria.com.ng" className="flex items-center gap-2 hover:text-amber-400 transition-colors">
+              <Mail className="w-4 h-4 text-amber-400" />
+              <span>info@maria.com.ng</span>
+            </a>
+          </div>
+          <div className="flex items-center gap-2 text-xs sm:text-sm text-slate-300">
+            <MapPin className="w-4 h-4 text-amber-400" />
+            <span>Kano State, Nigeria</span>
+          </div>
+        </div>
+      </div>
 
-      {/* ── Hero ── */}
-      <section className="bg-ink">
-        <div className="mx-auto grid max-w-6xl gap-10 px-5 pt-16 pb-14 md:grid-cols-[1.1fr_0.9fr] md:pt-24 md:pb-20">
-          <div>
-            <span className="inline-block rounded-full border border-gold-500/30 bg-gold-500/10 px-3 py-1 font-mono text-[11px] uppercase tracking-widest text-gold-400">
-              Wallet · NIN &amp; BVN · WAEC · NECO · NABTEB
-            </span>
-            <h1 className="mt-5 font-display text-4xl leading-[1.08] font-bold text-cream sm:text-5xl lg:text-6xl">
-              Top up like you're
-              <br />
-              trading <span className="text-gold-500">gold.</span>
+      {/* Main Navigation */}
+      <nav className="sticky top-0 z-50 bg-white/95 backdrop-blur-md shadow-sm border-b border-slate-100">
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 py-3 flex justify-between items-center">
+          {/* Brand Logo */}
+          <div className="flex items-center gap-3">
+            <img src="/branding/logo.jpg" alt="MARIA Integrity General Enterprise" className="h-12 w-12 rounded-full border-2 border-[#D4AF37] bg-white object-contain p-0.5 shadow-md" />
+            <div>
+              <span className="text-2xl font-black tracking-wider text-[#0A192F] block leading-none">MARIA</span>
+              <span className="text-[9px] font-bold tracking-widest text-[#D4AF37] uppercase block mt-1">
+                Integrity General Enterprise
+              </span>
+            </div>
+          </div>
+
+          {/* Desktop Navigation Links */}
+          <div className="hidden md:flex items-center gap-8 font-medium text-slate-700">
+            <a href="#home" className="hover:text-[#D4AF37] transition-colors">Home</a>
+            <a href="#about" className="hover:text-[#D4AF37] transition-colors">About Us</a>
+            <a href="#services" className="hover:text-[#D4AF37] transition-colors">Services</a>
+            <a href="#features" className="hover:text-[#D4AF37] transition-colors">Features</a>
+            <a href="#contact" className="hover:text-[#D4AF37] transition-colors">Contact</a>
+          </div>
+
+          {/* CTA Button */}
+          <div className="hidden md:block">
+            <Link 
+              to="/login" 
+              className="bg-[#0A192F] text-amber-400 border border-amber-400/40 hover:bg-[#D4AF37] hover:text-[#0A192F] px-5 py-2.5 rounded-lg font-semibold transition-all duration-300 shadow-sm"
+            >
+              Get Started
+            </Link>
+          </div>
+
+          {/* Mobile Menu Button */}
+          <button 
+            className="md:hidden text-slate-700 p-2"
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+          >
+            {isMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+          </button>
+        </div>
+
+        {/* Mobile Dropdown */}
+        {isMenuOpen && (
+          <div className="md:hidden bg-white border-b border-slate-200 px-4 py-4 space-y-3 shadow-lg">
+            <a href="#home" className="block text-slate-700 font-medium py-1" onClick={() => setIsMenuOpen(false)}>Home</a>
+            <a href="#about" className="block text-slate-700 font-medium py-1" onClick={() => setIsMenuOpen(false)}>About Us</a>
+            <a href="#services" className="block text-slate-700 font-medium py-1" onClick={() => setIsMenuOpen(false)}>Services</a>
+            <a href="#features" className="block text-slate-700 font-medium py-1" onClick={() => setIsMenuOpen(false)}>Features</a>
+            <a href="#contact" className="block text-slate-700 font-medium py-1" onClick={() => setIsMenuOpen(false)}>Contact</a>
+            <Link 
+              to="/login" 
+              className="block text-center bg-[#0A192F] text-amber-400 py-2.5 rounded-lg font-semibold mt-2"
+              onClick={() => setIsMenuOpen(false)}
+            >
+              Get Started
+            </Link>
+          </div>
+        )}
+      </nav>
+
+      {/* Hero Section */}
+      <section id="home" className="relative bg-[#0A192F] text-white py-20 lg:py-28 overflow-hidden">
+        <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#D4AF37_1px,transparent_1px)] [background-size:16px_16px]"></div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 relative z-10 grid md:grid-cols-2 gap-12 items-center">
+          <div className="space-y-6">
+            <div className="inline-flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 text-[#D4AF37] px-3.5 py-1.5 rounded-full text-sm font-medium">
+              <span className="animate-pulse">🚀</span>
+              <span>Nigeria's Best Digital Platform</span>
+            </div>
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-tight">
+              Fastest Digital <span className="text-[#D4AF37]">Solutions</span> in Africa
             </h1>
-            <p className="mt-5 max-w-md font-body text-base leading-relaxed text-cream/60 sm:text-lg">
-              One wallet for airtime, data, cable and electricity — plus NIN/BVN
-              verification and WAEC/NECO/NABTEB result checking. Fund once, spend
-              on all of it, at rates that don't move against you.
+            <p className="text-slate-300 text-lg leading-relaxed max-w-xl">
+              Experience lightning-fast transactions for airtime, data, bills, and subscriptions with Maria Integrity Enterprise.
             </p>
-            <div className="mt-8 flex flex-wrap items-center gap-4">
-              <Link
-                to="/register"
-                className="rounded-lg bg-gold-500 px-6 py-3.5 font-display text-sm font-semibold text-ink transition hover:bg-gold-400"
+            <div className="flex flex-col sm:flex-row gap-4 pt-2">
+              <Link 
+                to="/login" 
+                className="inline-flex items-center justify-center gap-2 bg-[#D4AF37] text-[#0A192F] font-bold px-7 py-3.5 rounded-lg hover:bg-amber-400 transition-all shadow-lg"
               >
-                Get Started
+                <span>Start Now</span>
+                <ArrowRight className="w-5 h-5" />
               </Link>
-              <a
-                href="#download"
-                className="flex items-center gap-2 font-body text-sm font-medium text-cream/80 transition hover:text-cream"
+              <a 
+                href="#services" 
+                className="inline-flex items-center justify-center bg-transparent border border-slate-600 hover:border-amber-400 text-slate-200 hover:text-white px-7 py-3.5 rounded-lg transition-all"
               >
-                <Download size={16} /> Get the mobile app
+                Explore Services
               </a>
             </div>
           </div>
+          
+          {/* Animated Dashboard Overview Container */}
+          <div className="relative">
+            {/* Glowing effect behind dashboard */}
+            <div className="absolute -inset-1 bg-gradient-to-r from-amber-500/30 to-[#D4AF37]/20 rounded-2xl blur-xl animate-pulse"></div>
 
-          {/* Live rates board panel */}
-          <div className="rounded-2xl border border-ink-line bg-ink-soft p-5">
-            <div className="flex items-center justify-between border-b border-ink-line pb-3">
-              <span className="font-display text-sm font-semibold text-cream">Live Rates Board</span>
-              <span className="flex items-center gap-1.5 font-mono text-[11px] text-success-500">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success-500" /> LIVE
-              </span>
+            {/* Floating Badge (Animated) */}
+            <div className="absolute -top-6 -right-2 sm:-right-4 z-20 bg-white text-slate-800 p-3 rounded-xl shadow-xl border border-slate-100 flex items-center gap-3 animate-bounce [animation-duration:3s]">
+              <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs font-bold leading-tight">Secure Payments</p>
+                <p className="text-[10px] text-slate-500">256-bit SSL Encrypted</p>
+              </div>
             </div>
-            <div className="mt-3 divide-y divide-ink-line">
-              {[
-                ['1GB · MTN SME', '₦345'],
-                ['2GB · Glo Gifting', '₦480'],
-                ['5GB · Airtel Corporate', '₦1,900'],
-                ['Airtime · All networks', 'up to 3% off'],
-                ['DStv Compact', '₦19,000'],
-              ].map(([label, price]) => (
-                <div key={label} className="flex items-center justify-between py-2.5">
-                  <span className="font-mono text-sm text-cream/70">{label}</span>
-                  <span className="font-mono text-sm font-semibold text-gold-400">{price}</span>
+
+            {/* Floating Instant Delivery Tag */}
+            <div className="absolute -bottom-5 -left-2 sm:-left-4 z-20 bg-white text-slate-800 px-4 py-2.5 rounded-xl shadow-xl border border-slate-100 flex items-center gap-2 animate-pulse">
+              <Zap className="w-4 h-4 text-amber-500 fill-amber-500" />
+              <div>
+                <p className="text-xs font-bold">Instant Delivery</p>
+                <p className="text-[10px] text-slate-500">Under 5 seconds</p>
+              </div>
+            </div>
+
+            {/* Dashboard Card Frame */}
+            <div className="dashboard-overview relative bg-white rounded-2xl shadow-2xl p-6 text-slate-800 border border-slate-100 space-y-5">
+              {/* Top Controls Header */}
+              <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-red-400 block"></span>
+                  <span className="w-3 h-3 rounded-full bg-amber-400 block"></span>
+                  <span className="w-3 h-3 rounded-full bg-emerald-400 block"></span>
                 </div>
-              ))}
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Dashboard Overview</span>
+              </div>
+
+              {/* Animated Transaction Rows */}
+              <div className="space-y-3">
+                {/* Airtime Row */}
+                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100 transform hover:-translate-y-0.5 transition-all">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                      <Smartphone className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-[#0A192F]">Airtime Purchase</p>
+                      <p className="text-[10px] text-slate-500">MTN ₦1,000</p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">+₦1,000</span>
+                </div>
+
+                {/* Data Row */}
+                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100 transform hover:-translate-y-0.5 transition-all">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
+                      <Wifi className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-[#0A192F]">Data Bundle</p>
+                      <p className="text-[10px] text-slate-500">Glo 10GB</p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded">-₦2,500</span>
+                </div>
+
+                {/* Electricity Bill Row */}
+                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100 transform hover:-translate-y-0.5 transition-all">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+                      <Zap className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-[#0A192F]">Electricity Bill</p>
+                      <p className="text-[10px] text-slate-500">Ikeja Electric</p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded">-₦5,000</span>
+                </div>
+              </div>
+
+              {/* Usage Progress Bar */}
+              <div className="pt-2">
+                <div className="flex justify-between text-[11px] font-bold text-slate-500 mb-1.5">
+                  <span>Monthly Usage</span>
+                  <span className="text-[#0A192F]">₦45,000 / ₦100,000</span>
+                </div>
+                <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-[#0A192F] to-[#D4AF37] rounded-full w-[45%] transition-all duration-1000"></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      <RatesTicker />
-
-      {/* ── All services ── */}
-      <section id="services" className="hidden" aria-hidden="true">
-        <div className="max-w-lg">
-          <span className="font-mono text-xs uppercase tracking-widest text-bronze-500">
-            The board
-          </span>
-          <h2 className="mt-2 font-display text-3xl font-bold text-ink sm:text-4xl">
-            Everything you top up, in one place
-          </h2>
-          <p className="mt-3 font-body text-sm text-ink-600">
-            The exact same menu as the app — services still being wired up on the
-            web show a "Coming soon" tag instead of a dead link.
-          </p>
-        </div>
-        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {ALL_SERVICES.map((s) => {
-            const tint = TINT_CLASSES[s.tint];
-            return (
-              <Link
-                key={s.route}
-                to={s.route}
-                className="group relative rounded-xl border border-parchment-line bg-parchment p-6 transition hover:border-gold-500/60"
-              >
-                {!s.implemented && (
-                  <span className="absolute top-4 right-4 rounded-full bg-ink/6 px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-ink-600">
-                    Soon
-                  </span>
-                )}
-                <div className={`flex h-11 w-11 items-center justify-center rounded-lg ${tint.bg} ${tint.text}`}>
-                  <s.icon size={20} />
-                </div>
-                <h3 className="mt-4 font-display text-base font-semibold text-ink">{s.label}</h3>
-                <p className="mt-1 font-body text-sm text-ink-600">{s.description}</p>
-              </Link>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* ── NIN & BVN Verification ── */}
-      <section id="verification" className="hidden" aria-hidden="true">
-        <div className="mx-auto max-w-6xl px-5 py-20">
-          <div className="max-w-lg">
-            <span className="font-mono text-xs uppercase tracking-widest text-bronze-500">
-              Identity services
-            </span>
-            <h2 className="mt-2 font-display text-3xl font-bold text-ink sm:text-4xl">
-              NIN and BVN, verified in seconds
-            </h2>
-            <p className="mt-3 font-body text-sm text-ink-600">
-              Every identity slip and lookup NIMC and your bank ask for — no cyber
-              café queue, delivered straight to your wallet.
-            </p>
-          </div>
-
-          <div className="mt-10 grid gap-8 lg:grid-cols-2">
-            <VerificationGroup
-              title="NIN"
-              icon={IdCard}
-              items={NIN_SERVICES}
-              prices={verificationPrices}
-            />
-            <VerificationGroup
-              title="BVN"
-              icon={Fingerprint}
-              items={BVN_SERVICES}
-              prices={verificationPrices}
-            />
-          </div>
-
-          <div className="mt-8 flex justify-center">
-            <Link
-              to="/register"
-              className="rounded-lg bg-ink px-6 py-3.5 font-display text-sm font-semibold text-cream transition hover:bg-ink-soft"
-            >
-              Verify your NIN or BVN
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Result Checker Pricing ── */}
-      <section id="result-checkers" className="mx-auto max-w-6xl px-5 py-20">
-        <div className="max-w-lg">
-          <span className="font-mono text-xs uppercase tracking-widest text-bronze-500">
-            Result checkers
-          </span>
-          <h2 className="mt-2 font-display text-3xl font-bold text-ink sm:text-4xl">
-            WAEC, NECO &amp; NABTEB pins, at real prices
-          </h2>
-          <p className="mt-3 font-body text-sm text-ink-600">
-            These are our live prices, pulled straight from the same system that processes
-            every order — not a rate card that goes stale.
-          </p>
-        </div>
-
-        <div className="mt-10 grid gap-4 sm:grid-cols-3">
-          {resultPrices === null &&
-            [0, 1, 2].map((i) => (
-              <div
-                key={i}
-                className="h-56 animate-pulse rounded-xl border border-parchment-line bg-parchment"
-              />
-            ))}
-
-          {resultPrices?.length === 0 && (
-            <div className="col-span-full rounded-xl border border-dashed border-parchment-line px-6 py-10 text-center font-body text-sm text-ink-600">
-              Result checker pricing is being updated — check back shortly, or see current
-              prices in the app after you register.
+      {/* Stats Section */}
+      <section className="py-10 bg-white border-b border-slate-100">
+        <div className="max-w-7xl mx-auto px-4 sm:px-8">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-6 text-center">
+            <div>
+              <h3 className="text-3xl sm:text-4xl font-extrabold text-[#0A192F]">50,000+</h3>
+              <p className="text-xs sm:text-sm font-semibold text-slate-500 mt-1">Active Users</p>
             </div>
-          )}
+            <div>
+              <h3 className="text-3xl sm:text-4xl font-extrabold text-[#0A192F]">99.9%</h3>
+              <p className="text-xs sm:text-sm font-semibold text-slate-500 mt-1">Success Rate</p>
+            </div>
+            <div className="col-span-2 md:col-span-1">
+              <h3 className="text-3xl sm:text-4xl font-extrabold text-[#0A192F]">24/7</h3>
+              <p className="text-xs sm:text-sm font-semibold text-slate-500 mt-1">Support Hours</p>
+            </div>
+          </div>
+        </div>
+      </section>
 
-          {resultPrices?.map((p) => {
-            const Icon = RESULT_ICON[p.service] ?? GraduationCap;
-            return (
-              <div
-                key={p.service}
-                className="flex flex-col rounded-xl border border-parchment-line bg-parchment p-6"
-              >
-                <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-ink text-gold-500">
-                  <Icon size={20} />
+      {/* Services Section */}
+      <section id="services" className="py-20 bg-slate-100">
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 space-y-12">
+          <div className="text-center max-w-2xl mx-auto space-y-3">
+            <span className="text-xs font-bold uppercase tracking-widest text-[#D4AF37]">Our Services</span>
+            <h2 className="text-3xl sm:text-4xl font-bold text-[#0A192F]">Comprehensive Digital Solutions</h2>
+            <p className="text-slate-600 text-sm">Tailored VTU and automated payment systems designed for your daily convenience.</p>
+          </div>
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {vtuServices.map((service, index) => {
+              const IconComp = service.icon;
+              return (
+                <div key={index} className="bg-white p-6 rounded-2xl border border-slate-200 hover:shadow-xl transition-all duration-300 space-y-4 group flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-[#0A192F] group-hover:bg-[#0A192F] group-hover:text-[#D4AF37] transition-colors">
+                      <IconComp className="w-6 h-6" />
+                    </div>
+                    <h3 className="text-xl font-bold text-[#0A192F]">{service.title}</h3>
+                    <p className="text-slate-600 text-xs leading-relaxed">{service.desc}</p>
+                  </div>
+                  
+                  <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
+                    <span className="text-xs font-bold text-[#D4AF37]">{service.priceTag}</span>
+                    <a href="#contact" className="text-[#0A192F] group-hover:text-[#D4AF37] transition-colors">
+                      <ArrowRight className="w-4 h-4" />
+                    </a>
+                  </div>
                 </div>
-                <h3 className="mt-4 font-display text-base font-semibold text-ink">
-                  {p.label}
-                </h3>
-                <p className="mt-1 font-body text-xs text-ink-600">
-                  Delivered instantly to your wallet's transaction history.
-                </p>
-                <div className="mt-5 flex items-baseline gap-1">
-                  <span className="font-display text-2xl font-bold text-ink">
-                    ₦{p.unit_price.toLocaleString()}
-                  </span>
-                  <span className="font-body text-xs text-ink-600">/ pin</span>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* Why Choose Us Section */}
+      <section id="features" className="py-20 bg-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 space-y-12">
+          <div className="text-center max-w-2xl mx-auto space-y-3">
+            <span className="text-xs font-bold uppercase tracking-widest text-[#D4AF37]">Why Choose Us</span>
+            <h2 className="text-3xl sm:text-4xl font-bold text-[#0A192F]">Built For Speed & Reliability</h2>
+            <p className="text-slate-600 text-sm">We provide the best experience with cutting-edge transaction technology.</p>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-8">
+            <div className="p-8 rounded-2xl bg-slate-50 border border-slate-100 text-center space-y-4 hover:shadow-lg transition-all">
+              <div className="w-14 h-14 bg-[#0A192F] text-[#D4AF37] rounded-xl flex items-center justify-center mx-auto">
+                <Zap className="w-7 h-7" />
+              </div>
+              <h3 className="text-xl font-bold text-[#0A192F]">Lightning Fast</h3>
+              <p className="text-slate-600 text-xs leading-relaxed">
+                Transactions completed in under 5 seconds with 99.9% uptime guarantee.
+              </p>
+            </div>
+
+            <div className="p-8 rounded-2xl bg-slate-50 border border-slate-100 text-center space-y-4 hover:shadow-lg transition-all">
+              <div className="w-14 h-14 bg-[#0A192F] text-[#D4AF37] rounded-xl flex items-center justify-center mx-auto">
+                <Lock className="w-7 h-7" />
+              </div>
+              <h3 className="text-xl font-bold text-[#0A192F]">Secure & Safe</h3>
+              <p className="text-slate-600 text-xs leading-relaxed">
+                Bank-grade encryption and secure payment processing for total peace of mind.
+              </p>
+            </div>
+
+            <div className="p-8 rounded-2xl bg-slate-50 border border-slate-100 text-center space-y-4 hover:shadow-lg transition-all">
+              <div className="w-14 h-14 bg-[#0A192F] text-[#D4AF37] rounded-xl flex items-center justify-center mx-auto">
+                <Headphones className="w-7 h-7" />
+              </div>
+              <h3 className="text-xl font-bold text-[#0A192F]">24/7 Support</h3>
+              <p className="text-slate-600 text-xs leading-relaxed">
+                Dedicated customer support team available round the clock to assist you.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Testimonials Section */}
+      <section id="testimonials" className="py-20 bg-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 text-center"><h2 className="text-3xl sm:text-4xl font-bold text-[#0A192F]">What Our <span className="text-cyan-500">Customers Say</span></h2><p className="mt-3 text-slate-600">Trusted by thousands of satisfied users</p><div className="mt-12 grid gap-8 text-left md:grid-cols-3">{[['MS','Muhammad Saleem','Best platform for VTU services! Transactions are instant and customer support is amazing. Highly recommended!'],['SU','Sunusi Usama',"I've been using this platform for 6 months. Never had any issues. The best part is the competitive rates!"],['MO','Mohammed Odugwuene','The API integration was seamless. Perfect for my business needs. 5/5 stars!']].map(([initial,name,quote]) => <article key={name} className="rounded-2xl border border-slate-200 bg-slate-50 p-7"><div className="flex items-center gap-3"><span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-500 font-bold text-white">{initial}</span><div><b>{name}</b><div className="text-amber-400">★★★★★</div></div></div><p className="mt-5 text-sm italic leading-relaxed text-slate-600">“{quote}”</p></article>)}</div></div>
+      </section>
+
+      {/* Contact Section */}
+      <section id="contact" className="py-20 bg-slate-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-8">
+          <div className="grid md:grid-cols-2 gap-12 bg-[#0A192F] text-white rounded-2xl p-8 sm:p-12 shadow-2xl relative overflow-hidden">
+            <div className="space-y-6 z-10">
+              <span className="text-xs font-bold uppercase tracking-widest text-[#D4AF37]">Get In Touch</span>
+              <h2 className="text-3xl font-bold">Ready to Get Started?</h2>
+              <p className="text-slate-300 text-sm leading-relaxed">
+                Reach out to Maria Integrity Enterprise today for inquiries, API integrations, or support.
+              </p>
+              
+              <div className="space-y-4 pt-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 bg-white/10 rounded-lg flex items-center justify-center text-[#D4AF37]">
+                    <Phone className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400">Phone</p>
+                    <p className="text-sm font-semibold text-white">+234 703 424 8143</p>
+                  </div>
                 </div>
-                <Link
-                  to="/register"
-                  className="mt-5 rounded-lg bg-ink px-4 py-2.5 text-center font-body text-sm font-semibold text-cream transition hover:bg-ink-soft"
-                >
-                  Get a {p.label.split(' ')[0]} pin
-                </Link>
-              </div>
-            );
-          })}
-        </div>
-      </section>
 
-      {/* ── How it works ── */}
-      <section id="how-it-works" className="bg-parchment">
-        <div className="mx-auto max-w-6xl px-5 py-20">
-          <div className="max-w-lg">
-            <span className="font-mono text-xs uppercase tracking-widest text-bronze-500">
-              The process
-            </span>
-            <h2 className="mt-2 font-display text-3xl font-bold text-ink sm:text-4xl">
-              Three steps, every time
-            </h2>
-          </div>
-          <div className="mt-10 grid gap-8 md:grid-cols-3">
-            {STEPS.map((step, i) => (
-              <div key={step.title} className="relative">
-                <span className="font-mono text-5xl font-bold text-gold-500/20">0{i + 1}</span>
-                <div className="-mt-6 flex h-10 w-10 items-center justify-center rounded-full bg-ink text-gold-500">
-                  <step.icon size={18} />
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 bg-white/10 rounded-lg flex items-center justify-center text-[#D4AF37]">
+                    <Mail className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400">Email</p>
+                    <p className="text-sm font-semibold text-white">info@maria.com.ng</p>
+                  </div>
                 </div>
-                <h3 className="mt-4 font-display text-lg font-semibold text-ink">{step.title}</h3>
-                <p className="mt-1.5 font-body text-sm leading-relaxed text-ink-600">
-                  {step.desc}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
 
-      {/* ── Trust ── */}
-      <section className="bg-ink">
-        <div className="mx-auto max-w-6xl px-5 py-20">
-          <div className="max-w-lg">
-            <span className="font-mono text-xs uppercase tracking-widest text-gold-500">
-              Built to be trusted
-            </span>
-            <h2 className="mt-2 font-display text-3xl font-bold text-cream sm:text-4xl">
-              Not just fast — accountable
-            </h2>
-          </div>
-          <div className="mt-10 grid gap-6 md:grid-cols-3">
-            {TRUST_POINTS.map((t) => (
-              <div key={t.title} className="rounded-xl border border-ink-line bg-ink-soft p-6">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gold-500/10 text-gold-500">
-                  <t.icon size={18} />
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 bg-white/10 rounded-lg flex items-center justify-center text-[#D4AF37]">
+                    <MapPin className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400">Office Address</p>
+                    <p className="text-sm font-semibold text-white">Kano State, Nigeria</p>
+                  </div>
                 </div>
-                <h3 className="mt-4 font-display text-base font-semibold text-cream">
-                  {t.title}
-                </h3>
-                <p className="mt-1.5 font-body text-sm leading-relaxed text-cream/60">{t.desc}</p>
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
+            </div>
 
-      {/* ── FAQ ── */}
-      <section id="faq" className="bg-parchment">
-        <div className="mx-auto max-w-3xl px-5 py-20">
-          <div className="text-center">
-            <span className="font-mono text-xs uppercase tracking-widest text-bronze-500">
-              Questions
-            </span>
-            <h2 className="mt-2 font-display text-3xl font-bold text-ink sm:text-4xl">
-              Before you get started
-            </h2>
-          </div>
-          <div className="mt-10 divide-y divide-parchment-line rounded-xl border border-parchment-line bg-cream">
-            {FAQS.map((item) => (
-              <FaqItem key={item.q} {...item} />
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── Download CTA ── */}
-      <section id="download" className="bg-ink">
-        <div className="mx-auto flex max-w-6xl flex-col items-center gap-6 px-5 py-20 text-center">
-          <span className="font-mono text-xs uppercase tracking-widest text-gold-500">
-            Take it with you
-          </span>
-          <h2 className="max-w-xl font-display text-3xl font-bold text-cream sm:text-4xl">
-            The full experience lives in the app
-          </h2>
-          <p className="max-w-md font-body text-sm text-cream/60">
-            Biometric login, saved beneficiaries, instant push alerts on every transaction.
-          </p>
-          <div className="mt-2 flex flex-wrap justify-center gap-4">
-            <a
-              href={ANDROID_APK_URL}
-              className="flex items-center gap-2 rounded-lg bg-gold-500 px-6 py-3.5 font-display text-sm font-semibold text-ink transition hover:bg-gold-400"
-            >
-              <Download size={16} /> Download for Android
-            </a>
-            <Link
-              to="/register"
-              className="rounded-lg border border-ink-line px-6 py-3.5 font-body text-sm font-medium text-cream/80 transition hover:text-cream"
-            >
-              Continue on the web instead
-            </Link>
-          </div>
-          <p className="max-w-sm font-body text-xs text-cream/40">
-            Not on the Play Store yet — this installs directly. Android will ask you to allow
-            it the first time; that's expected, see the FAQ below.
-          </p>
-          <a
-            href={whatsappLink("Hello MAJOR DATA-LINK, I'd like to know more before signing up")}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-2 font-body text-xs text-cream/40 transition hover:text-cream/70"
-          >
-            <MessageCircle size={13} /> Or ask us a question first, on WhatsApp
-          </a>
-        </div>
-      </section>
-
-      <Footer />
-    </div>
-  );
-}
-
-type VerificationItem = {
-  icon: typeof IdCard;
-  label: string;
-  desc: string;
-  note?: string;
-  service: string;
-};
-
-function VerificationGroup({
-  title,
-  icon: GroupIcon,
-  items,
-  prices,
-}: {
-  title: string;
-  icon: typeof IdCard;
-  items: VerificationItem[];
-  prices: Record<string, number> | null;
-}) {
-  return (
-    <div className="rounded-xl border border-parchment-line bg-cream p-2 sm:p-3">
-      <div className="flex items-center gap-2.5 px-4 py-3">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink text-gold-500">
-          <GroupIcon size={16} />
-        </div>
-        <h3 className="font-display text-sm font-semibold tracking-wide text-ink uppercase">
-          {title}
-        </h3>
-      </div>
-      <div className="divide-y divide-parchment-line">
-        {items.map((item) => {
-          const price = prices?.[item.service];
-          return (
-            <Link
-              key={item.service}
-              to="/register"
-              className="group flex items-center gap-4 px-4 py-3.5 transition hover:bg-parchment"
-            >
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gold-500/12 text-gold-600">
-                <item.icon size={16} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="font-body text-sm font-semibold text-ink">{item.label}</p>
-                <p className="truncate font-body text-xs text-ink-600">
-                  {item.note ? `${item.desc} · ${item.note}` : item.desc}
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                {prices === null ? (
-                  <span className="h-4 w-12 animate-pulse rounded bg-parchment-line" />
-                ) : price !== undefined ? (
-                  <span className="font-mono text-sm font-semibold text-ink">
-                    ₦{price.toLocaleString()}
-                  </span>
-                ) : null}
-                <ArrowRight
-                  size={14}
-                  className="text-ink-600/40 transition group-hover:translate-x-0.5 group-hover:text-gold-600"
+            {/* Quick Contact Form */}
+            <form onSubmit={(e) => e.preventDefault()} className="bg-white text-slate-800 p-6 sm:p-8 rounded-xl space-y-4 z-10">
+              <h3 className="text-xl font-bold text-[#0A192F]">Send Us A Message</h3>
+              
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Full Name</label>
+                <input 
+                  type="text" 
+                  placeholder="Your Name" 
+                  className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#0A192F] text-sm"
                 />
               </div>
-            </Link>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
-function FaqItem({ q, a }: { q: string; a: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="px-5">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between gap-4 py-4 text-left"
-      >
-        <span className="font-body text-sm font-semibold text-ink">{q}</span>
-        <ChevronDown
-          size={16}
-          className={`shrink-0 text-ink-600 transition-transform ${open ? 'rotate-180' : ''}`}
-        />
-      </button>
-      {open && <p className="pb-4 font-body text-sm leading-relaxed text-ink-600">{a}</p>}
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Email Address</label>
+                <input 
+                  type="email" 
+                  placeholder="your.email@example.com" 
+                  className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#0A192F] text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Message</label>
+                <textarea 
+                  rows={4} 
+                  placeholder="How can we help you?" 
+                  className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#0A192F] text-sm resize-none"
+                ></textarea>
+              </div>
+
+              <button 
+                type="submit" 
+                className="w-full bg-[#0A192F] text-amber-400 font-bold py-3 rounded-lg hover:bg-[#D4AF37] hover:text-[#0A192F] transition-colors shadow-md"
+              >
+                Send Message
+              </button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="bg-[#0A192F] text-slate-400 text-xs border-t border-slate-800 py-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 flex flex-col sm:flex-row justify-between items-center gap-4">
+          <p>© {new Date().getFullYear()} MARIA Integrity General Enterprise. All rights reserved.</p>
+          <div className="flex gap-6">
+            <a href="#home" className="hover:text-amber-400 transition-colors">Privacy Policy</a>
+            <a href="#home" className="hover:text-amber-400 transition-colors">Terms of Service</a>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

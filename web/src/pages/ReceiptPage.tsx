@@ -195,7 +195,7 @@ export default function ReceiptPage() {
         {/* Footer */}
         <div className="border-t border-parchment-line bg-parchment/50 px-6 py-5 text-center sm:px-10">
           <p className="font-body text-xs leading-relaxed text-ink-600">
-            This is an automatically generated receipt from MAJOR DATA-LINK. Keep it for your
+            This is an automatically generated receipt from MARIA Digital Solutions. Keep it for your
             records — quote the reference above if you ever need support with this transaction.
           </p>
         </div>
@@ -248,3 +248,4 @@ function ReceiptShell({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+

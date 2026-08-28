@@ -29,13 +29,13 @@ export default function ComingSoonPage({ service }: { service: ServiceItem }) {
         </div>
 
         <p className="mt-6 max-w-sm font-body text-sm text-ink-600">
-          This one's ready right now in the MAJOR DATA-LINK mobile app — download it to use{' '}
+          This one's ready right now in the MARIA Digital Solutions mobile app — download it to use{' '}
           {service.label} today. We're bringing it to the website next.
         </p>
 
         <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
           <a
-            href={whatsappLink(`Hello MAJOR DATA-LINK, I'd like help with ${service.label}`)}
+            href={whatsappLink(`Hello MARIA Digital Solutions, I'd like help with ${service.label}`)}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-2 rounded-lg bg-ink px-4 py-2.5 font-body text-sm font-semibold text-cream transition hover:bg-ink-soft"
@@ -51,3 +51,4 @@ export default function ComingSoonPage({ service }: { service: ServiceItem }) {
     </AppShell>
   );
 }
+

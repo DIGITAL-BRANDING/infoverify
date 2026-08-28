@@ -188,11 +188,14 @@ authRoutes.post('/login', async (req, res) => {
   // for password AND PIN. A trusted device with a live session never calls
   // this route again; it unlocks locally with the same PIN instead.
   if (user.loginPinHash) {
-    if (!body.login_pin) {
+    // Login PIN is kept in the codebase for future re-enablement, but is
+    // currently disabled so password login is sufficient.
+    const LOGIN_PIN_ENABLED = false;
+    if (LOGIN_PIN_ENABLED && !body.login_pin) {
       throw new ApiError(401, 'Enter your 6-digit login PIN to continue', 'LOGIN_PIN_REQUIRED');
     }
     // Propagates LOGIN_PIN_LOCKED / INVALID_LOGIN_PIN as-is on failure.
-    await verifyLoginPin(user.id, body.login_pin);
+    if (LOGIN_PIN_ENABLED) await verifyLoginPin(user.id, body.login_pin!);
   }
 
   const tokens = await issueAuthTokens({ id: user.id, email: user.email });

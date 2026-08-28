@@ -1,4 +1,4 @@
-// Thin fetch wrapper for the MAJOR DATA-LINK backend API.
+// Thin fetch wrapper for the MARIA Digital Solutions backend API.
 // In dev, requests to /api/* are proxied to VITE_API_PROXY_TARGET (see vite.config.ts).
 // In production, set VITE_API_BASE_URL to the deployed backend origin
 // (leave empty if this app is served from the same origin as the API).
@@ -71,3 +71,4 @@ export const api = {
   post: <T>(path: string, body?: unknown, auth = true) =>
     request<T>(path, { method: 'POST', body, auth }),
 };
+

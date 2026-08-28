@@ -58,7 +58,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       );
       setUser(res.data);
       setMustChangePassword(!!res.data.requires_password_change);
-      setRequiresLoginPinSetup(!!res.data.requires_login_pin_setup);
+      // Login PIN remains implemented for future use, but is disabled currently.
+      setRequiresLoginPinSetup(false);
       setRequiresTransactionPinSetup(!!res.data.requires_pin_setup);
     } catch {
       clearTokens();
@@ -107,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setTokens(res.data.access_token, res.data.refresh_token);
     setUser(res.data.user);
     setMustChangePassword(!!res.data.requires_password_change);
-    setRequiresLoginPinSetup(!!res.data.requires_login_pin_setup);
+    setRequiresLoginPinSetup(false);
     setRequiresTransactionPinSetup(!!res.data.requires_pin_setup);
   }
 

@@ -14,6 +14,7 @@ import {
   Briefcase,
   ShieldCheck,
   Receipt,
+  Search,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -40,6 +41,23 @@ export type ServiceItem = {
 // — same order, same set — so a customer moving between the app and the
 // website sees one consistent menu.
 export const SERVICES: ServiceItem[] = [
+  { label: 'NIN_Phone Verification', description: 'Verify NIN and phone details.', icon: IdCard, route: '/nin', tint: 'gold', implemented: true },
+  { label: 'Phone Multiple', description: 'Check multiple phone numbers.', icon: Smartphone, route: '/phone', tint: 'bronze', implemented: false },
+  { label: 'CAC Services', description: 'Business registration and lookup.', icon: Briefcase, route: '/cac', tint: 'success', implemented: true },
+  { label: 'BVN Verification', description: 'Verify bank identity details.', icon: Fingerprint, route: '/bvn', tint: 'ember', implemented: true },
+  { label: 'IPE Clerance (Instant)', description: 'Instant identity clearance.', icon: ShieldCheck, route: '/ipe', tint: 'gold', implemented: true },
+  { label: 'Validation', description: 'Validate identity records.', icon: ClipboardList, route: '/validation', tint: 'bronze', implemented: true },
+  { label: 'Personalization', description: 'Personalize your identity details.', icon: IdCard, route: '/tracking', tint: 'success', implemented: true },
+  { label: 'BVN Retrieval', description: 'Retrieve BVN details.', icon: Fingerprint, route: '/bvn-ret', tint: 'ember', implemented: true },
+  { label: 'Self Service Unlink', description: 'Unlink identity services yourself.', icon: ShieldCheck, route: '/delink', tint: 'gold', implemented: true },
+  { label: 'NIN Modifications', description: 'Request NIN modifications.', icon: IdCard, route: '/modification', tint: 'bronze', implemented: true },
+  { label: 'Birth Attestation', description: 'Birth attestation services.', icon: Receipt, route: '/attestation', tint: 'success', implemented: true },
+  { label: 'TIN Certificate', description: 'Get your TIN certificate.', icon: Receipt, route: '/tin', tint: 'ember', implemented: true },
+  { label: 'Newspaper Publication', description: 'Publish notices in newspapers.', icon: MessageSquare, route: '/newspaper', tint: 'gold', implemented: true },
+  { label: 'Demographic Search', description: 'Search demographic records.', icon: Search, route: '/demo', tint: 'bronze', implemented: true },
+  { label: 'BVN License Creation', description: 'Create and onboard a BVN license.', icon: Fingerprint, route: '/bvn-license', tint: 'gold', implemented: false },
+  { label: 'BVN Modification', description: 'Request a BVN record modification.', icon: Fingerprint, route: '/bvn-modification', tint: 'bronze', implemented: false },
+  { label: 'BVN CRM', description: 'Manage BVN customer records.', icon: Fingerprint, route: '/bvn-crm', tint: 'gold', implemented: false },
   {
     label: 'Buy Data',
     description: 'Get data bundles for MTN, Glo, Airtel or 9mobile, delivered instantly.',

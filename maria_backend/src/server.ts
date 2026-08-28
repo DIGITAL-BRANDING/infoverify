@@ -81,7 +81,7 @@ async function startServer() {
     }
 
     const server = app.listen(env.PORT, '0.0.0.0', () => {
-      console.log(`MAJOR DATA-LINK backend listening on port ${env.PORT}`);
+      console.log(`MARIA Digital Solutions backend listening on port ${env.PORT}`);
     });
 
     server.on('error', (err: NodeJS.ErrnoException) => {

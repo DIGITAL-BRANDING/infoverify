@@ -81,7 +81,7 @@ export default function DashboardPage() {
             <span>Join group</span>
           </a>
           <a
-            href={whatsappLink('Hello MAJOR DATA-LINK, I need support.')}
+            href={whatsappLink('Hello MARIA Digital Solutions, I need support.')}
             target="_blank"
             rel="noreferrer"
             aria-label="Contact support"
@@ -169,8 +169,8 @@ export default function DashboardPage() {
       {/* All services */}
       <div className="mt-8">
         <h2 className="font-display text-base font-semibold text-ink">Services</h2>
-        <div className="mt-3 grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5">
-          {SERVICES.map((service) => (
+        <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          {SERVICES.slice(0, 17).map((service) => (
             <ServiceTile key={service.route} {...service} />
           ))}
         </div>
@@ -242,6 +242,10 @@ function ServiceTile({
   implemented,
 }: (typeof SERVICES)[number]) {
   const colors = TINT_CLASSES[tint];
+  const assetName = ({
+    '/nin': 'NIN_Phone_Verification.png', '/phone': 'Phone Multiple.png', '/cac': 'CAC Services.png', '/bvn': 'BVN Verifications.png',
+    '/ipe': 'IPE Clearance.png', '/validation': 'Validation.png', '/tracking': 'Personalization.png', '/bvn-ret': 'BVN Retrieval.png', '/delink': 'Self Service Unlink.png', '/modification': 'NIN Modification.png', '/bvn-license': 'BVN Verifications.png', '/bvn-modification': 'BVN Modification.png', '/attestation': 'Birth Attestation.png', '/tin': 'TIN Certificate.png', '/newspaper': 'Demographic Serach.png', '/demo': 'Demographic Serach.png'
+  } as Record<string, string>)[route];
   return (
     <Link
       to={route}
@@ -252,10 +256,8 @@ function ServiceTile({
           Soon
         </span>
       )}
-      <div
-        className={`service-tile-icon relative z-10 flex h-12 w-12 items-center justify-center rounded-xl ${colors.bg} ${colors.text} transition group-hover:scale-110`}
-      >
-        <Icon size={24} />
+      <div className={`service-tile-icon relative z-10 flex h-16 w-16 items-center justify-center rounded-full ${colors.bg} ${colors.text} transition group-hover:scale-110`}>
+        {assetName ? <img src={`/branding/${assetName}`} alt="" className="h-full w-full rounded-full object-contain" /> : <Icon size={24} />}
       </div>
       <span className="relative z-10 mt-3 font-body text-sm font-bold leading-tight text-[#fff7dd] drop-shadow">{label}</span>
     </Link>
@@ -274,3 +276,4 @@ function StatusBadge({ status }: { status: string }) {
     </span>
   );
 }
+

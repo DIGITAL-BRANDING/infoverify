@@ -1,3 +1,3 @@
 AdminJS.UserComponents = {}
-import AdjustWallet from '../src/admin/components/adjust-wallet'
-AdminJS.UserComponents.AdjustWallet = AdjustWallet
+import Dashboard from '../src/admin/components/dashboard'
+AdminJS.UserComponents.Dashboard = Dashboard
