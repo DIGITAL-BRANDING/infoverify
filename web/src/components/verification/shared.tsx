@@ -125,12 +125,15 @@ export function TierCardGrid<T extends string>({
   value,
   onChange,
   priceFor,
+  iconFor,
 }: {
   options: readonly T[];
   labels: Record<T, string>;
   value: T;
   onChange: (v: T) => void;
   priceFor: (v: T) => number | undefined;
+  /** Optional per-option preview icon (see SlipIcon) — shown above the label, matching the reference design's little slip images. */
+  iconFor?: (v: T) => SlipIconVariant;
 }) {
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5">
@@ -141,6 +144,11 @@ export function TierCardGrid<T extends string>({
           onClick={() => onChange(option)}
           className={`${TILE_CLASSES} ${value === option ? TILE_SELECTED_CLASSES : ''}`}
         >
+          {iconFor && (
+            <div className="mb-2 flex justify-center rounded-lg bg-white/10 p-1.5">
+              <SlipIcon variant={iconFor(option)} />
+            </div>
+          )}
           <span className="block text-xs font-semibold text-white sm:text-sm">{labels[option]}</span>
           <span className="mt-1 block text-xs font-bold text-gold-300">{money(priceFor(option))}</span>
         </button>
@@ -328,5 +336,130 @@ export function ConsentCheckbox({ checked, onChange }: { checked: boolean; onCha
       <input type="checkbox" required checked={checked} onChange={(e) => onChange(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 rounded border-blue-300 text-[#0b2f73] focus:ring-[#0b2f73]" />
       By checking this box, you agree that the owner of the ID has granted you consent to verify his/her identity.
     </label>
+  );
+}
+
+// ── Ticket tracking table (Personalization, BVN Retrieval, etc.) ────
+// Unlike useVerificationHistory above (SUCCESS-only, 7-day window, backed
+// by GET /verification/history), this is backed by GET /verification/tickets
+// and includes every status - PENDING requests are the whole point of a
+// "Check Status" tracking table like the reference screenshots show.
+export type ServiceTicket = {
+  reference: string;
+  ticket_id: string | null;
+  status: string;
+  message: string;
+  amount: number;
+  tracking_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export function useServiceTickets(serviceKey: string) {
+  const [tickets, setTickets] = useState<ServiceTicket[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  async function refresh() {
+    setLoading(true);
+    try {
+      const result = await api.get<{ status: boolean; data: ServiceTicket[] }>(`/verification/tickets?service=${encodeURIComponent(serviceKey)}`);
+      setTickets(result.data ?? []);
+    } catch {
+      setTickets([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serviceKey]);
+
+  return { tickets, loading, refresh };
+}
+
+export function StatusBadge({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    success: 'bg-success-500/15 text-success-600',
+    pending: 'bg-gold-500/15 text-gold-700',
+    failed: 'bg-ember-500/15 text-ember-600',
+    reversed: 'bg-ember-500/15 text-ember-600'
+  };
+  const labels: Record<string, string> = { success: 'Completed', pending: 'Processing', failed: 'Rejected', reversed: 'Refunded' };
+  return <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${styles[status] ?? 'bg-blue-100 text-[#0b2f73]'}`}>{labels[status] ?? status}</span>;
+}
+
+/**
+ * Small preview icons for each slip type, sitting above the label in
+ * TierCardGrid — matching the reference design's use of a distinct little
+ * card image per tier so the options are recognisable at a glance.
+ * Deliberately ORIGINAL, abstract artwork (a generic card silhouette with a
+ * photo circle / barcode / QR pattern) rather than any reproduction of the
+ * actual NIMC card or logo, which is protected government design - these
+ * only need to communicate "this is roughly what you'll receive", not be a
+ * faithful likeness.
+ */
+export type SlipIconVariant = 'none' | 'regular' | 'standard' | 'premium' | 'document';
+
+export function SlipIcon({ variant }: { variant: SlipIconVariant }) {
+  if (variant === 'none') {
+    return (
+      <svg viewBox="0 0 40 40" className="mx-auto h-9 w-9 text-white/50" fill="none">
+        <rect x="4" y="7" width="32" height="26" rx="3" stroke="currentColor" strokeWidth="2" strokeDasharray="4 3" />
+        <circle cx="15" cy="17" r="3.5" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M6 29l7-7 5 5 6-8 10 10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (variant === 'document') {
+    return (
+      <svg viewBox="0 0 40 40" className="mx-auto h-9 w-9" fill="none">
+        <rect x="8" y="4" width="24" height="32" rx="2.5" fill="#f4f1e8" stroke="#c9c2ad" strokeWidth="1.5" />
+        <rect x="13" y="11" width="14" height="2" rx="1" fill="#0b2f73" />
+        <rect x="13" y="16" width="14" height="1.6" rx="0.8" fill="#9aa5c0" />
+        <rect x="13" y="20" width="10" height="1.6" rx="0.8" fill="#9aa5c0" />
+        <rect x="13" y="27" width="14" height="4" rx="1" fill="#d8b34a" />
+      </svg>
+    );
+  }
+  if (variant === 'regular') {
+    return (
+      <svg viewBox="0 0 40 40" className="mx-auto h-9 w-9" fill="none">
+        <rect x="3" y="9" width="34" height="22" rx="2.5" fill="#fbfaf5" stroke="#c9c2ad" strokeWidth="1.4" />
+        <rect x="3" y="9" width="34" height="4" fill="#1f8a45" />
+        <circle cx="11" cy="21" r="4.2" fill="#c7d0e4" stroke="#7f8bab" strokeWidth="1" />
+        <rect x="18" y="17" width="15" height="1.6" rx="0.8" fill="#0b2f73" />
+        <rect x="18" y="21" width="12" height="1.4" rx="0.7" fill="#9aa5c0" />
+        <rect x="18" y="24.5" width="13" height="1.4" rx="0.7" fill="#9aa5c0" />
+      </svg>
+    );
+  }
+  if (variant === 'standard') {
+    return (
+      <svg viewBox="0 0 40 40" className="mx-auto h-9 w-9" fill="none">
+        <rect x="3" y="9" width="34" height="22" rx="2.5" fill="#e9ebef" stroke="#b7bdc9" strokeWidth="1.4" />
+        <circle cx="11" cy="18" r="4.4" fill="#c3c8d1" stroke="#8b93a3" strokeWidth="1" />
+        <rect x="4" y="26" width="32" height="4" fill="#232733" />
+        {[6, 8.5, 11, 14.5, 17, 19.5, 22, 25.5, 28, 30.5, 33].map((x, i) => (
+          <rect key={x} x={x} y="26.5" width={i % 3 === 0 ? 1.4 : 0.9} height="3" fill="#f5f5f7" />
+        ))}
+      </svg>
+    );
+  }
+  // premium — the green e-NIN slip
+  return (
+    <svg viewBox="0 0 40 40" className="mx-auto h-9 w-9" fill="none">
+      <rect x="3" y="9" width="34" height="22" rx="2.5" fill="#1f5c33" stroke="#123d20" strokeWidth="1.4" />
+      <circle cx="11" cy="20" r="4.4" fill="#3d7d55" stroke="#a9d9b9" strokeWidth="1" />
+      <rect x="18" y="15.5" width="15" height="1.5" rx="0.75" fill="#d9f2e1" />
+      <rect x="18" y="19" width="11" height="1.3" rx="0.65" fill="#9dcbac" />
+      <g fill="#e8f7ec">
+        <rect x="28" y="22" width="2.2" height="2.2" />
+        <rect x="31.2" y="22" width="2.2" height="2.2" />
+        <rect x="28" y="25.2" width="2.2" height="2.2" />
+        <rect x="31.2" y="25.2" width="1" height="1" />
+      </g>
+    </svg>
   );
 }

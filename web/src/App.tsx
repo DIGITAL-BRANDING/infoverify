@@ -21,6 +21,8 @@ import CacServicesPage from './pages/verification/CacServicesPage';
 import BvnVerificationPage from './pages/verification/BvnVerificationPage';
 import IpeClearancePage from './pages/verification/IpeClearancePage';
 import ValidationPage from './pages/verification/ValidationPage';
+import PersonalizationPage from './pages/verification/PersonalizationPage';
+import BvnRetrievalPage from './pages/verification/BvnRetrievalPage';
 import NinModificationPage from './pages/NinModificationPage';
 import FundWalletPage from './pages/FundWalletPage';
 import PaymentCallbackPage from './pages/PaymentCallbackPage';
@@ -82,9 +84,9 @@ export default function App() {
           <Route path="/validation" element={<ProtectedRoute><ValidationPage /></ProtectedRoute>} />
           <Route path="/nin-modification" element={<ProtectedRoute><NinModificationPage /></ProtectedRoute>} />
           <Route path="/modification" element={<ProtectedRoute><NinModificationPage /></ProtectedRoute>} />
-          <Route path="/tracking" element={<ProtectedRoute><VerificationPage mode="nin" /></ProtectedRoute>} />
+          <Route path="/tracking" element={<ProtectedRoute><PersonalizationPage /></ProtectedRoute>} />
           <Route path="/delink" element={<ProtectedRoute><VerificationPage mode="nin" /></ProtectedRoute>} />
-          <Route path="/bvn-ret" element={<ProtectedRoute><VerificationPage mode="bvn" /></ProtectedRoute>} />
+          <Route path="/bvn-ret" element={<ProtectedRoute><BvnRetrievalPage /></ProtectedRoute>} />
           <Route path="/terms" element={<PrivacyRedirect page="terms" />} />
           <Route path="/fund-wallet" element={<ProtectedRoute><FundWalletPage /></ProtectedRoute>} />
           <Route path="/deliveries" element={<ProtectedRoute><DeliveriesPage /></ProtectedRoute>} />

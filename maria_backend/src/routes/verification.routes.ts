@@ -13,6 +13,7 @@ import {
   checkNinValidationStatus,
   checkPersonalizationStatus,
   decryptTransactionPII,
+  listServiceTickets,
   listVerificationPrices,
   purchaseBvnSlip,
   purchaseNinByDemographic,
@@ -284,6 +285,16 @@ verificationRoutes.post('/personalization', async (req, res) => {
 verificationRoutes.get('/personalization/:ticketId', async (req, res) => {
   const result = await checkPersonalizationStatus({ userId: req.user!.id, ticketId: req.params.ticketId });
   res.json({ status: true, data: { ticket_id: result.ticketId, status: result.status, response: result.response } });
+});
+
+// ── Ticket tracking table (Personalization, BVN Retrieval, IPE, Validation) ──
+// See listServiceTickets in verification.service.ts for why this is separate
+// from GET /history: it includes PENDING requests, not just SUCCESS ones.
+verificationRoutes.get('/tickets', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const service = z.string().trim().min(1).max(60).parse(req.query.service);
+  const data = await listServiceTickets(req.user!.id, service);
+  res.json({ status: true, data });
 });
 
 verificationRoutes.post('/bvn-retrieval', async (req, res) => {

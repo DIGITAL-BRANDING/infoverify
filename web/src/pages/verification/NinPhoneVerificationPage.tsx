@@ -16,6 +16,7 @@ import {
   FORM_SECTION_CLASSES,
   FORM_INPUT_CLASSES,
   FORM_HELP_CLASSES,
+  type SlipIconVariant,
   type SlipResult,
 } from '../../components/verification/shared';
 
@@ -37,6 +38,9 @@ const PHONE_TIER_LABELS: Record<PhoneTier, string> = {
   standard: 'Standard Slip',
   premium: 'Premium Slip',
 };
+
+const NIN_TIER_ICON: Record<NinTier, SlipIconVariant> = { information: 'document', regular: 'regular', standard: 'standard', premium: 'premium', vnin: 'premium' };
+const PHONE_TIER_ICON: Record<PhoneTier, SlipIconVariant> = { regular: 'regular', standard: 'standard', premium: 'premium' };
 
 // "Information Slip" isn't wired up on Techhub's side yet (see
 // maria_backend/src/services/techhub.service.ts — TechhubSlipTier only
@@ -143,9 +147,10 @@ export default function NinPhoneVerificationPage() {
                     value={ninTier}
                     onChange={setNinTier}
                     priceFor={(t) => (t === 'information' ? undefined : prices[NIN_KEY[t]])}
+                    iconFor={(t) => NIN_TIER_ICON[t]}
                   />
                 ) : (
-                  <TierCardGrid options={PHONE_TIERS} labels={PHONE_TIER_LABELS} value={phoneTier} onChange={setPhoneTier} priceFor={(t) => prices[PHONE_KEY[t]]} />
+                  <TierCardGrid options={PHONE_TIERS} labels={PHONE_TIER_LABELS} value={phoneTier} onChange={setPhoneTier} priceFor={(t) => prices[PHONE_KEY[t]]} iconFor={(t) => PHONE_TIER_ICON[t]} />
                 )}
               </div>
 

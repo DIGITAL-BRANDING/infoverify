@@ -18,6 +18,8 @@ import {
   FORM_HELP_CLASSES,
   TILE_CLASSES,
   TILE_SELECTED_CLASSES,
+  SlipIcon,
+  type SlipIconVariant,
   type AsyncResult,
   type TicketStatus,
 } from '../../components/verification/shared';
@@ -41,6 +43,7 @@ type DetailValue = (typeof DETAILS)[number]['value'];
 const SLIP_TYPES = ['no-slip', 'regular', 'standard', 'premium'] as const;
 type SlipType = (typeof SLIP_TYPES)[number];
 const SLIP_LABEL: Record<SlipType, string> = { 'no-slip': 'No Slip', regular: 'Regular Slip', standard: 'Standard Slip', premium: 'Premium Slip' };
+const SLIP_ICON: Record<SlipType, SlipIconVariant> = { 'no-slip': 'none', regular: 'regular', standard: 'standard', premium: 'premium' };
 
 export default function ValidationPage() {
   const { prices } = useVerificationPrices();
@@ -116,6 +119,9 @@ export default function ValidationPage() {
               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
                 {SLIP_TYPES.map((s) => (
                   <button key={s} type="button" onClick={() => setSlipType(s)} className={`${TILE_CLASSES} ${slipType === s ? TILE_SELECTED_CLASSES : ''}`}>
+                    <div className="mb-2 flex justify-center rounded-lg bg-white/10 p-1.5">
+                      <SlipIcon variant={SLIP_ICON[s]} />
+                    </div>
                     <span className="block text-xs font-semibold sm:text-sm">{SLIP_LABEL[s]}</span>
                     <span className="mt-1 block text-xs font-bold text-gold-300">{s === 'no-slip' ? money(0) : 'Coming soon'}</span>
                   </button>

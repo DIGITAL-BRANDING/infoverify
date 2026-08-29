@@ -681,6 +681,72 @@ export function checkIpeClearanceStatus(params: { userId: string; ticketId: stri
   });
 }
 
+export type ServiceTicketEntry = {
+  reference: string;
+  ticket_id: string | null;
+  status: string;
+  message: string;
+  amount: number;
+  tracking_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function friendlyTicketMessage(status: TransactionStatus): string {
+  switch (status) {
+    case TransactionStatus.SUCCESS:
+      return 'Completed';
+    case TransactionStatus.FAILED:
+      return 'Rejected — refunded to wallet';
+    case TransactionStatus.REVERSED:
+      return 'Reversed — refunded to wallet';
+    default:
+      return 'Submitted, awaiting provider response';
+  }
+}
+
+/**
+ * Every async (ticket-based) service submitted through submitAsyncService()
+ * above shares the same shape: TransactionType.IDENTITY_SERVICE_REQUEST,
+ * with `service` on the metadata. Unlike listVerificationHistory (the
+ * `/history` route), this deliberately does NOT filter to
+ * status: SUCCESS only or a 7-day window — Personalization, BVN Retrieval,
+ * IPE Clearance and NIN Validation can all sit PENDING for hours to weeks,
+ * and the reference screenshots' "Transactions" tables are specifically
+ * there to track a request while it's still in that state, with a
+ * "Check Status" action per row (see PersonalizationPage.tsx /
+ * BvnRetrievalPage.tsx on the frontend).
+ */
+export async function listServiceTickets(userId: string, service: string): Promise<ServiceTicketEntry[]> {
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const transactions = await prisma.transaction.findMany({
+    where: { userId, type: TransactionType.IDENTITY_SERVICE_REQUEST, createdAt: { gte: since } },
+    orderBy: { createdAt: 'desc' },
+    take: 200
+  });
+
+  return transactions
+    .filter((transaction) => {
+      const metadata = transaction.metadata as Record<string, unknown> | null;
+      return metadata?.service === service;
+    })
+    .slice(0, 30)
+    .map((transaction) => {
+      const metadata = transaction.metadata as Record<string, unknown> | null;
+      const pii = openPII<{ tracking_id?: string }>(metadata?.pii);
+      return {
+        reference: transaction.reference,
+        ticket_id: typeof metadata?.ticket_id === 'string' ? metadata.ticket_id : null,
+        status: transaction.status.toLowerCase(),
+        message: friendlyTicketMessage(transaction.status),
+        amount: koboToNaira(transaction.amountKobo),
+        tracking_id: typeof pii?.tracking_id === 'string' ? pii.tracking_id : null,
+        created_at: transaction.createdAt.toISOString(),
+        updated_at: transaction.updatedAt.toISOString()
+      };
+    });
+}
+
 /**
  * Decrypts the PII sealed on a verification Transaction's metadata. The ONE
  * place this is ever called from is the "View PII" admin action on the
