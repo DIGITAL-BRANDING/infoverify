@@ -351,6 +351,8 @@ export type ServiceTicket = {
   message: string;
   amount: number;
   tracking_id: string | null;
+  nin: string | null;
+  email: string | null;
   created_at: string;
   updated_at: string;
 };

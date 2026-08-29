@@ -688,6 +688,8 @@ export type ServiceTicketEntry = {
   message: string;
   amount: number;
   tracking_id: string | null;
+  nin: string | null;
+  email: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -733,7 +735,7 @@ export async function listServiceTickets(userId: string, service: string): Promi
     .slice(0, 30)
     .map((transaction) => {
       const metadata = transaction.metadata as Record<string, unknown> | null;
-      const pii = openPII<{ tracking_id?: string }>(metadata?.pii);
+      const pii = openPII<{ tracking_id?: string; nin?: string; email?: string }>(metadata?.pii);
       return {
         reference: transaction.reference,
         ticket_id: typeof metadata?.ticket_id === 'string' ? metadata.ticket_id : null,
@@ -741,6 +743,8 @@ export async function listServiceTickets(userId: string, service: string): Promi
         message: friendlyTicketMessage(transaction.status),
         amount: koboToNaira(transaction.amountKobo),
         tracking_id: typeof pii?.tracking_id === 'string' ? pii.tracking_id : null,
+        nin: typeof pii?.nin === 'string' ? pii.nin : null,
+        email: typeof pii?.email === 'string' ? pii.email : null,
         created_at: transaction.createdAt.toISOString(),
         updated_at: transaction.updatedAt.toISOString()
       };
