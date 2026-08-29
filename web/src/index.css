@@ -259,3 +259,16 @@ main#home #services .bg-white p,
 main#home #services .bg-white span { color: #ffffff !important; }
 main#home #features .bg-\[\#0b2f73\] h3, main#home #features .bg-\[\#0b2f73\] p { color: #ffffff !important; }
 main#home .dashboard-overview, main#home .dashboard-overview h3, main#home .dashboard-overview p, main#home .dashboard-overview span { color: #ffffff !important; }
+
+/* Royal-blue surfaces and high-contrast controls on verification forms. */
+.verification-blue-page .bg-parchment,
+.verification-blue-page section.bg-parchment,
+.verification-blue-page header.bg-parchment { background: #0b2f73 !important; color: #fff !important; border-color: #3d6fb9 !important; }
+.verification-blue-page .text-ink, .verification-blue-page .text-ink-600,
+.verification-blue-page .text-ink-400, .verification-blue-page label { color: #fff !important; }
+.verification-blue-page input, .verification-blue-page select, .verification-blue-page textarea { background: #08245b !important; color: #fff !important; border-color: #6f9bd8 !important; }
+.verification-blue-page input::placeholder { color: #c9d8f2 !important; }
+.verification-blue-page .bg-cream { background: #08245b !important; color: #fff !important; }
+.verification-blue-page .bg-gold-500 { background: #d9ad2b !important; color: #071a40 !important; }
+.verification-blue-page .text-gold-700 { color: #f6d568 !important; }
+.verification-blue-page .border-parchment-line { border-color: #6f9bd8 !important; }

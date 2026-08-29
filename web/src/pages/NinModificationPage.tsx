@@ -121,7 +121,7 @@ export default function NinModificationPage() {
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-5xl">
+      <div className="verification-blue-page mx-auto max-w-5xl">
         <button
           onClick={() => (selected ? setSelectedType(null) : nav('/nin-services'))}
           className="font-body text-sm font-semibold text-gold-700"

@@ -91,7 +91,7 @@ export default function ValidationPage() {
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-4xl">
+      <div className="verification-blue-page mx-auto max-w-4xl">
         <div className="mt-1 flex items-center justify-between">
           <PageHeader
             title="Validation (Instant)"
