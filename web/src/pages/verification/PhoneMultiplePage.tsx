@@ -3,7 +3,7 @@ import { Loader2 } from 'lucide-react';
 import AppShell from '../../components/AppShell';
 import { api, ApiError } from '../../lib/api';
 import { PinConfirmDialog } from '../../components/PinConfirmDialog';
-import { PageHeader, StepLabel, ConsentCheckbox, money, useVerificationPrices } from '../../components/verification/shared';
+import { PageHeader, StepLabel, ConsentCheckbox, money, useVerificationPrices, FORM_SECTION_CLASSES, FORM_INPUT_CLASSES, FORM_HELP_CLASSES } from '../../components/verification/shared';
 
 /**
  * "Phone Multiple" — enter a phone number, get back every NIN record linked
@@ -79,7 +79,7 @@ export default function PhoneMultiplePage() {
           subtitle="Enter your phone number to retrieve linked NIN information. If the phone number is connected to multiple NIN records, all matched results will be shown."
         />
 
-        <section className="mt-6 rounded-2xl border border-blue-400/50 bg-[#0b2f73] p-6">
+        <section className={FORM_SECTION_CLASSES}>
           {results === null ? (
             <form onSubmit={prepare}>
               <StepLabel n={1}>Enter Phone Number</StepLabel>
@@ -88,38 +88,38 @@ export default function PhoneMultiplePage() {
                 inputMode="numeric"
                 maxLength={11}
                 placeholder="Enter Phone Number"
-                className="mt-3 w-full rounded-xl border border-parchment-line bg-cream p-3 text-ink outline-none focus:border-gold-500"
+                className={`mt-3 ${FORM_INPUT_CLASSES}`}
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
               />
-              <p className="mt-1 font-body text-xs text-ink-600">Enter your 11-digit phone number starting with 0 (e.g., 08012345678). One phone number may return multiple linked NIN records.</p>
+              <p className={`mt-1 ${FORM_HELP_CLASSES}`}>Enter your 11-digit phone number starting with 0 (e.g., 08012345678). One phone number may return multiple linked NIN records.</p>
 
               <ConsentCheckbox checked={consent} onChange={setConsent} />
 
-              <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-                <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">Service cost: {money(prices[SERVICE_KEY])}</span>
-                <button disabled={busy || !consent} className="flex items-center justify-center gap-2 rounded-xl bg-gold-500 px-6 py-3 font-display font-semibold text-ink disabled:opacity-60">
+              <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span className="rounded-full bg-gold-500/15 px-4 py-2 text-center font-body text-sm font-bold text-gold-700">Service cost: {money(prices[SERVICE_KEY])}</span>
+                <button disabled={busy || !consent} className="flex w-full items-center justify-center gap-2 rounded-xl bg-gold-500 px-6 py-3 font-display font-semibold text-ink disabled:opacity-60 sm:w-auto">
                   {busy ? <Loader2 size={16} className="animate-spin" /> : `Verify (${money(prices[SERVICE_KEY])})`}
                 </button>
               </div>
-              {message && <p className="mt-3 rounded-lg bg-cream p-3 font-body text-sm text-ink-600">{message}</p>}
+              {message && <p className="mt-3 rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>}
             </form>
           ) : (
             <div>
-              <p className="rounded-lg bg-cream p-3 font-body text-sm text-ink-600">{message}</p>
+              <p className="rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>
 
               {results.length === 0 ? (
-                <p className="mt-4 rounded-xl border border-dashed border-parchment-line px-4 py-6 text-center font-body text-sm text-ink-600">No NIN records are linked to this phone number.</p>
+                <p className="mt-4 rounded-xl border border-dashed border-blue-200 px-4 py-6 text-center font-body text-sm text-[#0b2f73]/70">No NIN records are linked to this phone number.</p>
               ) : (
                 <div className="mt-4 space-y-3">
                   {results.map((record, index) => (
-                    <div key={String(record.nin ?? index)} className="rounded-xl bg-cream p-4">
+                    <div key={String(record.nin ?? index)} className="rounded-xl bg-blue-50 p-4">
                       {Object.entries(record)
                         .filter(([, value]) => value !== null && value !== undefined)
                         .map(([key, value]) => (
-                          <div key={key} className="flex justify-between border-b border-parchment-line py-1.5 text-sm last:border-0">
-                            <span className="font-body capitalize text-ink-600">{key.replace(/_/g, ' ')}</span>
-                            <span className="font-body font-semibold text-ink">{String(value)}</span>
+                          <div key={key} className="flex justify-between border-b border-blue-100 py-1.5 text-sm last:border-0">
+                            <span className="font-body capitalize text-[#0b2f73]/70">{key.replace(/_/g, ' ')}</span>
+                            <span className="break-all text-right font-body font-semibold text-[#0b2f73]">{String(value)}</span>
                           </div>
                         ))}
                     </div>
@@ -133,7 +133,7 @@ export default function PhoneMultiplePage() {
                   setMessage('');
                   setPhone('');
                 }}
-                className="mt-4 w-full rounded-xl border border-parchment-line py-2.5 font-body text-sm text-ink-600"
+                className="mt-4 w-full rounded-xl border border-blue-200 py-2.5 font-body text-sm text-[#0b2f73]"
               >
                 Done
               </button>

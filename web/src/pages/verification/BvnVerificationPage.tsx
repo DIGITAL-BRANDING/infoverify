@@ -12,6 +12,11 @@ import {
   useVerificationPrices,
   useVerificationHistory,
   money,
+  FORM_SECTION_CLASSES,
+  FORM_INPUT_CLASSES,
+  FORM_HELP_CLASSES,
+  TILE_CLASSES,
+  TILE_SELECTED_CLASSES,
   type SlipResult,
 } from '../../components/verification/shared';
 
@@ -67,28 +72,21 @@ export default function BvnVerificationPage() {
       <div className="mx-auto max-w-3xl">
         <PageHeader title="BVN Verification" />
 
-        <section className="mt-6 rounded-2xl border border-blue-400/50 bg-[#0b2f73] p-6">
+        <section className={FORM_SECTION_CLASSES}>
           {!result ? (
             <form onSubmit={prepare}>
               <StepLabel n={1}>Slip layout</StepLabel>
-              <div className="mt-3 grid grid-cols-2 gap-3">
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:gap-3">
                 {TIERS.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setTier(t)}
-                    className={`rounded-xl border p-4 text-center transition hover:-translate-y-0.5 ${
-                      tier === t ? 'border-[#8b6914] bg-[#6b4f0b] text-white shadow-md' : 'border-parchment-line bg-cream text-ink hover:border-gold-500'
-                    }`}
-                  >
-                    <span className="block font-semibold">{TIER_LABEL[t]}</span>
-                    <span className={`mt-1 block text-xs font-bold ${tier === t ? 'text-[#ffe9a3]' : 'text-gold-700'}`}>{money(prices[TIER_KEY[t]])}</span>
+                  <button key={t} type="button" onClick={() => setTier(t)} className={`${TILE_CLASSES} ${tier === t ? TILE_SELECTED_CLASSES : ''}`}>
+                    <span className="block text-xs font-semibold sm:text-sm">{TIER_LABEL[t]}</span>
+                    <span className="mt-1 block text-xs font-bold text-gold-300">{money(prices[TIER_KEY[t]])}</span>
                   </button>
                 ))}
               </div>
 
               <StepLabel n={2}>Supply BVN Number</StepLabel>
-              <div className="mt-3 flex items-start gap-2 rounded-xl border border-gold-500/30 bg-gold-500/10 p-3 font-body text-xs text-ink-600">
+              <div className="mt-3 flex items-start gap-2 rounded-xl border border-gold-500/30 bg-gold-500/10 p-3 font-body text-xs text-[#0b2f73]/80">
                 <Terminal size={16} className="mt-0.5 shrink-0 text-gold-700" />
                 <span>
                   <b>Need help?</b> Dial <span className="font-mono">*565*0#</span> from your registered phone number to retrieve your BVN instantly.
@@ -99,21 +97,21 @@ export default function BvnVerificationPage() {
                 inputMode="numeric"
                 maxLength={11}
                 placeholder="BVN Number"
-                className="mt-3 w-full rounded-xl border border-parchment-line bg-cream p-3 text-ink outline-none focus:border-gold-500"
+                className={`mt-3 ${FORM_INPUT_CLASSES}`}
                 value={bvn}
                 onChange={(e) => setBvn(e.target.value)}
               />
-              <p className="mt-1 font-body text-xs text-ink-600">We'll never share your details with anyone else.</p>
+              <p className={`mt-1 ${FORM_HELP_CLASSES}`}>We'll never share your details with anyone else.</p>
 
               <ConsentCheckbox checked={consent} onChange={setConsent} />
 
-              <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-                <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">Service cost: {money(price)}</span>
-                <button disabled={busy || !consent} className="flex items-center justify-center gap-2 rounded-xl bg-gold-500 px-6 py-3 font-display font-semibold text-ink disabled:opacity-60">
+              <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span className="rounded-full bg-gold-500/15 px-4 py-2 text-center font-body text-sm font-bold text-gold-700">Service cost: {money(price)}</span>
+                <button disabled={busy || !consent} className="flex w-full items-center justify-center gap-2 rounded-xl bg-gold-500 px-6 py-3 font-display font-semibold text-ink disabled:opacity-60 sm:w-auto">
                   {busy ? <Loader2 size={16} className="animate-spin" /> : 'Verify'}
                 </button>
               </div>
-              {message && <p className="mt-3 rounded-lg bg-cream p-3 font-body text-sm text-ink-600">{message}</p>}
+              {message && <p className="mt-3 rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>}
             </form>
           ) : (
             <SlipResultView

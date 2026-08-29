@@ -3,7 +3,7 @@ import { Download, Loader2 } from 'lucide-react';
 import AppShell from '../../components/AppShell';
 import { api, ApiError } from '../../lib/api';
 import { PinConfirmDialog } from '../../components/PinConfirmDialog';
-import { PageHeader, money } from '../../components/verification/shared';
+import { PageHeader, money, FORM_SECTION_CLASSES, FORM_INPUT_CLASSES, FORM_LABEL_CLASSES, FORM_HELP_CLASSES } from '../../components/verification/shared';
 
 type CacType = 'sole' | 'partnership' | 'llc';
 type CacPriceRow = { type: CacType; title: string; unitPrice: number; isActive: boolean };
@@ -97,15 +97,15 @@ export default function CacServicesPage() {
       <div className="mx-auto max-w-4xl">
         <PageHeader title="CAC Services" subtitle="Business name and company registration. Requests are registered manually with CAC by our team — this isn't an instant service." />
 
-        <section className="mt-6 rounded-2xl border border-blue-400/50 bg-[#0b2f73] p-6">
+        <section className={FORM_SECTION_CLASSES}>
           <form onSubmit={prepare}>
-            <label className="font-body text-sm font-medium text-ink-600">
+            <label className={FORM_LABEL_CLASSES}>
               Choose Service
               <select
                 required
                 value={service}
                 onChange={(e) => setService(e.target.value as CacType)}
-                className="mt-1 w-full rounded-xl border border-parchment-line bg-cream p-3 text-ink outline-none focus:border-gold-500"
+                className={`mt-1 ${FORM_INPUT_CLASSES}`}
               >
                 <option value="">-- Select Service --</option>
                 {SERVICE_OPTIONS.map((s) => {
@@ -117,63 +117,63 @@ export default function CacServicesPage() {
                   );
                 })}
               </select>
-              <span className="mt-1 block font-body text-xs text-ink-400">
+              <span className={`mt-1 block ${FORM_HELP_CLASSES}`}>
                 Registering an NGO, Club, Association, or a company with more than ₦1,000,000 share capital? These are quoted individually — contact support instead of using this form.
               </span>
             </label>
 
             {service && (
               <>
-                <label className="mt-4 block font-body text-sm font-medium text-ink-600">
+                <label className={`mt-4 block ${FORM_LABEL_CLASSES}`}>
                   Proposed Name 1
                   <input
                     required
                     maxLength={200}
                     placeholder="e.g. Amana Traders"
-                    className="mt-1 w-full rounded-xl border border-parchment-line bg-cream p-3 text-ink outline-none focus:border-gold-500"
+                    className={`mt-1 ${FORM_INPUT_CLASSES}`}
                     value={name1}
                     onChange={(e) => setName1(e.target.value)}
                   />
                 </label>
-                <label className="mt-4 block font-body text-sm font-medium text-ink-600">
-                  Proposed Name 2 <span className="font-normal text-ink-400">(backup, optional)</span>
+                <label className={`mt-4 block ${FORM_LABEL_CLASSES}`}>
+                  Proposed Name 2 <span className="font-normal text-[#0b2f73]/50">(backup, optional)</span>
                   <input
                     maxLength={200}
                     placeholder="e.g. Amana Global Ventures"
-                    className="mt-1 w-full rounded-xl border border-parchment-line bg-cream p-3 text-ink outline-none focus:border-gold-500"
+                    className={`mt-1 ${FORM_INPUT_CLASSES}`}
                     value={name2}
                     onChange={(e) => setName2(e.target.value)}
                   />
                 </label>
 
-                <label className="mt-5 flex items-start gap-2 font-body text-xs text-ink-600">
-                  <input type="checkbox" required checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-parchment-line" />
+                <label className="mt-5 flex items-start gap-2 font-body text-xs text-[#0b2f73]/80">
+                  <input type="checkbox" required checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 rounded border-blue-300 text-[#0b2f73] focus:ring-[#0b2f73]" />
                   I confirm these business name(s) and details are accurate, and I authorise this registration on my behalf.
                 </label>
 
-                <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-                  <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">Service cost: {money(selectedPrice)}</span>
-                  <button disabled={busy || !consent} className="flex items-center justify-center gap-2 rounded-xl bg-gold-500 px-6 py-3 font-display font-semibold text-ink disabled:opacity-60">
+                <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <span className="rounded-full bg-gold-500/15 px-4 py-2 text-center font-body text-sm font-bold text-gold-700">Service cost: {money(selectedPrice)}</span>
+                  <button disabled={busy || !consent} className="flex w-full items-center justify-center gap-2 rounded-xl bg-gold-500 px-6 py-3 font-display font-semibold text-ink disabled:opacity-60 sm:w-auto">
                     {busy ? <Loader2 size={16} className="animate-spin" /> : 'Continue'}
                   </button>
                 </div>
               </>
             )}
-            {message && <p className="mt-3 rounded-lg bg-cream p-3 font-body text-sm text-ink-600">{message}</p>}
+            {message && <p className="mt-3 rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>}
           </form>
 
-          <div className="mt-8 border-t border-parchment-line pt-5">
-            <h3 className="font-display text-base font-bold text-ink">Transactions</h3>
+          <div className="mt-8 border-t border-blue-100 pt-5">
+            <h3 className="font-display text-base font-bold text-[#0b2f73]">Transactions</h3>
 
             {loadingHistory ? (
-              <p className="mt-3 font-body text-sm text-ink-600">Loading…</p>
+              <p className="mt-3 font-body text-sm text-[#0b2f73]/70">Loading…</p>
             ) : history.length === 0 ? (
-              <p className="mt-3 rounded-xl border border-dashed border-parchment-line px-4 py-4 text-center font-body text-sm text-ink-600">No transactions recorded yet.</p>
+              <p className="mt-3 rounded-xl border border-dashed border-blue-200 px-4 py-4 text-center font-body text-sm text-[#0b2f73]/70">No transactions recorded yet.</p>
             ) : (
-              <div className="mt-3 overflow-x-auto rounded-xl border border-parchment-line bg-cream">
+              <div className="mt-3 overflow-x-auto rounded-xl border border-blue-100 bg-blue-50">
                 <table className="w-full text-left font-body text-xs">
                   <thead>
-                    <tr className="border-b border-parchment-line text-ink-600">
+                    <tr className="border-b border-blue-100 text-[#0b2f73]/70">
                       {['Ref ID', 'Type', 'Proposed Nm 1', 'Proposed Nm 2', 'Amount', 'Status', 'Progress Notes', 'Date', ''].map((h) => (
                         <th key={h} className="whitespace-nowrap px-3 py-2 font-semibold">
                           {h}
@@ -183,12 +183,12 @@ export default function CacServicesPage() {
                   </thead>
                   <tbody>
                     {history.map((row) => (
-                      <tr key={row.reference} className="border-b border-parchment-line last:border-0">
-                        <td className="whitespace-nowrap px-3 py-2 font-mono">{row.reference}</td>
-                        <td className="whitespace-nowrap px-3 py-2">{SERVICE_OPTIONS.find((s) => s.value === row.cac_type)?.label ?? row.cac_type}</td>
-                        <td className="px-3 py-2">{row.proposed_name_1 ?? '—'}</td>
-                        <td className="px-3 py-2">{row.proposed_name_2 ?? '—'}</td>
-                        <td className="whitespace-nowrap px-3 py-2">{money(row.amount)}</td>
+                      <tr key={row.reference} className="border-b border-blue-100 last:border-0">
+                        <td className="whitespace-nowrap px-3 py-2 font-mono text-[#0b2f73]">{row.reference}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-[#0b2f73]">{SERVICE_OPTIONS.find((s) => s.value === row.cac_type)?.label ?? row.cac_type}</td>
+                        <td className="px-3 py-2 text-[#0b2f73]">{row.proposed_name_1 ?? '—'}</td>
+                        <td className="px-3 py-2 text-[#0b2f73]">{row.proposed_name_2 ?? '—'}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-[#0b2f73]">{money(row.amount)}</td>
                         <td className="whitespace-nowrap px-3 py-2">
                           <span
                             className={`rounded-full px-2 py-1 text-[10px] font-bold ${
@@ -198,8 +198,8 @@ export default function CacServicesPage() {
                             {STATUS_LABEL[row.status] ?? row.status}
                           </span>
                         </td>
-                        <td className="max-w-[200px] px-3 py-2 text-ink-600">{row.progress_notes ?? '—'}</td>
-                        <td className="whitespace-nowrap px-3 py-2 text-ink-600">{new Date(row.created_at).toLocaleDateString()}</td>
+                        <td className="max-w-[200px] px-3 py-2 text-[#0b2f73]/70">{row.progress_notes ?? '—'}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-[#0b2f73]/70">{new Date(row.created_at).toLocaleDateString()}</td>
                         <td className="whitespace-nowrap px-3 py-2">
                           {row.certificate_pdf_base64 ? (
                             <a
@@ -210,7 +210,7 @@ export default function CacServicesPage() {
                               <Download size={12} /> PDF
                             </a>
                           ) : (
-                            <span className="text-ink-400">—</span>
+                            <span className="text-[#0b2f73]/40">—</span>
                           )}
                         </td>
                       </tr>

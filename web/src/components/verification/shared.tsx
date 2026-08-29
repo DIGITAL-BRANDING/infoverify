@@ -19,6 +19,27 @@ export type VerificationHistory = {
 export const money = (amount?: number) =>
   amount === undefined ? 'Price loading…' : `₦${amount.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`;
 
+/**
+ * Two-tone palette used across every split-out verification page:
+ *   - "Tiles" (the intro banner + selectable option cards) are filled solid
+ *     royal blue with white text, for high contrast against the blue.
+ *   - "Forms" (the card holding the actual inputs) are white with royal
+ *     blue text, so the blue reads as an accent, not a wash the labels
+ *     disappear into.
+ * Kept as exported class-string constants (rather than a Tailwind color
+ * token) so every page and shared component stays visually consistent
+ * without having to remember the exact hex each time.
+ */
+export const ROYAL_BLUE = '#0b2f73';
+export const TILE_CLASSES =
+  'rounded-xl border-2 border-transparent bg-[#0b2f73] p-3 text-center text-white shadow-sm transition hover:-translate-y-0.5 hover:brightness-110 sm:p-4';
+export const TILE_SELECTED_CLASSES = 'border-gold-400 ring-2 ring-gold-400/50 shadow-lg';
+export const FORM_SECTION_CLASSES = 'mt-6 rounded-2xl border border-blue-100 bg-white p-4 shadow-sm sm:p-6';
+export const FORM_INPUT_CLASSES =
+  'w-full rounded-xl border border-blue-200 bg-white p-3 text-[#0b2f73] outline-none placeholder:text-blue-300 focus:border-[#0b2f73]';
+export const FORM_LABEL_CLASSES = 'font-body text-sm font-medium text-[#0b2f73]';
+export const FORM_HELP_CLASSES = 'font-body text-xs text-[#0b2f73]/70';
+
 // ── Prices ──────────────────────────────────────────────────────
 export function useVerificationPrices() {
   const [prices, setPrices] = useState<Record<string, number>>({});
@@ -112,18 +133,16 @@ export function TierCardGrid<T extends string>({
   priceFor: (v: T) => number | undefined;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5">
       {options.map((option) => (
         <button
           key={option}
           type="button"
           onClick={() => onChange(option)}
-          className={`rounded-xl border p-4 text-center transition hover:-translate-y-0.5 ${
-            value === option ? 'border-[#8b6914] bg-[#6b4f0b] text-white shadow-md' : 'border-parchment-line bg-cream text-ink hover:border-gold-500'
-          }`}
+          className={`${TILE_CLASSES} ${value === option ? TILE_SELECTED_CLASSES : ''}`}
         >
-          <span className="block text-sm font-semibold">{labels[option]}</span>
-          <span className={`mt-1 block text-xs font-bold ${value === option ? 'text-[#ffe9a3]' : 'text-gold-700'}`}>{money(priceFor(option))}</span>
+          <span className="block text-xs font-semibold text-white sm:text-sm">{labels[option]}</span>
+          <span className="mt-1 block text-xs font-bold text-gold-300">{money(priceFor(option))}</span>
         </button>
       ))}
     </div>
@@ -140,15 +159,15 @@ export function SlipResultView({ result, message, onDone }: { result: SlipResult
     <div className="mt-6">
       <div className="flex items-center gap-2 rounded-lg border border-success-500/30 bg-success-500/5 px-4 py-3">
         <CheckCircle2 size={18} className="shrink-0 text-success-500" />
-        <p className="font-body text-sm text-ink">{message}</p>
+        <p className="font-body text-sm text-[#0b2f73]">{message}</p>
       </div>
 
       {dataEntries.length > 0 && (
-        <div className="mt-4 grid gap-x-6 gap-y-2 rounded-xl bg-cream p-4 sm:grid-cols-2">
+        <div className="mt-4 grid gap-x-6 gap-y-2 rounded-xl bg-blue-50 p-4 sm:grid-cols-2">
           {dataEntries.map(([key, value]) => (
-            <div key={key} className="flex justify-between border-b border-parchment-line py-1.5 text-sm">
-              <span className="font-body capitalize text-ink-600">{key.replace(/_/g, ' ')}</span>
-              <span className="font-body font-semibold text-ink">{String(value)}</span>
+            <div key={key} className="flex justify-between border-b border-blue-100 py-1.5 text-sm">
+              <span className="font-body capitalize text-[#0b2f73]/70">{key.replace(/_/g, ' ')}</span>
+              <span className="break-all text-right font-body font-semibold text-[#0b2f73]">{String(value)}</span>
             </div>
           ))}
         </div>
@@ -167,12 +186,12 @@ export function SlipResultView({ result, message, onDone }: { result: SlipResult
       )}
 
       {!pdfHref && (
-        <p className="mt-4 rounded-xl border border-gold-500/30 bg-gold-500/10 p-3 font-body text-sm text-ink-600">
+        <p className="mt-4 rounded-xl border border-gold-500/30 bg-gold-500/10 p-3 font-body text-sm text-[#0b2f73]/80">
           The provider confirmed this request, but did not return a downloadable PDF. Keep the reference above and contact support; do not submit or pay for the request again.
         </p>
       )}
 
-      <button onClick={onDone} className="mt-3 w-full rounded-xl border border-parchment-line py-2.5 font-body text-sm text-ink-600">
+      <button onClick={onDone} className="mt-3 w-full rounded-xl border border-blue-200 py-2.5 font-body text-sm text-[#0b2f73]">
         Done
       </button>
     </div>
@@ -199,46 +218,46 @@ export function AsyncResultView({
 
   return (
     <div className="mt-6">
-      {message && <p className="mb-4 rounded-lg bg-cream p-3 font-body text-sm text-ink-600">{message}</p>}
+      {message && <p className="mb-4 rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>}
 
       <div
         className={`flex items-center gap-3 rounded-xl border px-4 py-4 ${
-          state === 'success' ? 'border-success-500/30 bg-success-500/5' : state === 'failed' ? 'border-ember-500/30 bg-ember-500/5' : 'border-parchment-line bg-cream'
+          state === 'success' ? 'border-success-500/30 bg-success-500/5' : state === 'failed' ? 'border-ember-500/30 bg-ember-500/5' : 'border-blue-100 bg-blue-50'
         }`}
       >
         {state === 'success' ? (
-          <CheckCircle2 size={22} className="text-success-500" />
+          <CheckCircle2 size={22} className="shrink-0 text-success-500" />
         ) : state === 'failed' ? (
-          <XCircle size={22} className="text-ember-500" />
+          <XCircle size={22} className="shrink-0 text-ember-500" />
         ) : (
-          <Clock size={22} className="text-gold-600" />
+          <Clock size={22} className="shrink-0 text-gold-600" />
         )}
         <div>
-          <p className="font-display font-semibold text-ink">{state === 'success' ? 'Approved' : state === 'failed' ? 'Rejected — refunded to your wallet' : 'Pending review'}</p>
-          <p className="font-mono text-xs text-ink-600">Ticket: {ticket.ticket_id}</p>
+          <p className="font-display font-semibold text-[#0b2f73]">{state === 'success' ? 'Approved' : state === 'failed' ? 'Rejected — refunded to your wallet' : 'Pending review'}</p>
+          <p className="break-all font-mono text-xs text-[#0b2f73]/70">Ticket: {ticket.ticket_id}</p>
         </div>
       </div>
 
       {responseEntries.length > 0 && (
-        <div className="mt-4 grid gap-x-6 gap-y-2 rounded-xl bg-cream p-4 sm:grid-cols-2">
+        <div className="mt-4 grid gap-x-6 gap-y-2 rounded-xl bg-blue-50 p-4 sm:grid-cols-2">
           {responseEntries.map(([key, value]) => (
-            <div key={key} className="flex justify-between border-b border-parchment-line py-1.5 text-sm">
-              <span className="font-body capitalize text-ink-600">{key.replace(/_/g, ' ')}</span>
-              <span className="font-body font-semibold text-ink">{String(value)}</span>
+            <div key={key} className="flex justify-between border-b border-blue-100 py-1.5 text-sm">
+              <span className="font-body capitalize text-[#0b2f73]/70">{key.replace(/_/g, ' ')}</span>
+              <span className="break-all text-right font-body font-semibold text-[#0b2f73]">{String(value)}</span>
             </div>
           ))}
         </div>
       )}
 
       {state === 'pending' && (
-        <button onClick={onRefresh} disabled={polling} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-parchment-line py-2.5 font-body text-sm text-ink-600 disabled:opacity-60">
+        <button onClick={onRefresh} disabled={polling} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 py-2.5 font-body text-sm text-[#0b2f73] disabled:opacity-60">
           {polling ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
           Check again now
         </button>
       )}
-      <p className="mt-2 text-center font-body text-[11px] text-ink-400">We're also checking automatically every few seconds.</p>
+      <p className="mt-2 text-center font-body text-[11px] text-[#0b2f73]/50">We're also checking automatically every few seconds.</p>
 
-      <button onClick={onDone} className="mt-3 w-full rounded-xl border border-parchment-line py-2.5 font-body text-sm text-ink-600">
+      <button onClick={onDone} className="mt-3 w-full rounded-xl border border-blue-200 py-2.5 font-body text-sm text-[#0b2f73]">
         Done
       </button>
     </div>
@@ -247,32 +266,32 @@ export function AsyncResultView({
 
 export function VerificationHistoryView({ history, loading }: { history: VerificationHistory[]; loading: boolean }) {
   return (
-    <section className="mt-8 border-t border-parchment-line pt-5">
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 className="font-display text-base font-bold text-ink">Recent requests</h3>
-        <span className="font-body text-xs text-ink-600">Available for 7 days</span>
+    <section className="mt-8 border-t border-blue-100 pt-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="font-display text-base font-bold text-[#0b2f73]">Recent requests</h3>
+        <span className="font-body text-xs text-[#0b2f73]/70">Available for 7 days</span>
       </div>
       {loading ? (
-        <p className="mt-3 font-body text-sm text-ink-600">Loading recent requests…</p>
+        <p className="mt-3 font-body text-sm text-[#0b2f73]/70">Loading recent requests…</p>
       ) : history.length === 0 ? (
-        <p className="mt-3 rounded-xl border border-dashed border-parchment-line px-4 py-4 font-body text-sm text-ink-600">No request for this service in the last 7 days.</p>
+        <p className="mt-3 rounded-xl border border-dashed border-blue-200 px-4 py-4 font-body text-sm text-[#0b2f73]/70">No request for this service in the last 7 days.</p>
       ) : (
-        <div className="mt-3 divide-y divide-parchment-line overflow-hidden rounded-xl border border-parchment-line bg-cream">
+        <div className="mt-3 divide-y divide-blue-100 overflow-hidden rounded-xl border border-blue-100 bg-blue-50">
           {history.map((entry) => {
             const base64 = entry.pdf_base64?.replace(/^data:application\/pdf;base64,/i, '');
             const href = base64 ? `data:application/pdf;base64,${base64}` : entry.pdf_url?.startsWith('https://') ? entry.pdf_url : null;
             return (
               <div key={entry.reference} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-                <div>
-                  <p className="font-mono text-xs font-semibold text-ink">{entry.reference}</p>
-                  <p className="mt-1 font-body text-xs text-ink-600">{new Date(entry.created_at).toLocaleString()}</p>
+                <div className="min-w-0">
+                  <p className="break-all font-mono text-xs font-semibold text-[#0b2f73]">{entry.reference}</p>
+                  <p className="mt-1 font-body text-xs text-[#0b2f73]/70">{new Date(entry.created_at).toLocaleString()}</p>
                 </div>
                 {href ? (
-                  <a href={href} download={`${entry.reference}.pdf`} target={base64 ? undefined : '_blank'} rel={base64 ? undefined : 'noreferrer'} className="flex items-center gap-2 rounded-lg bg-gold-500 px-3 py-2 font-body text-xs font-bold text-ink">
+                  <a href={href} download={`${entry.reference}.pdf`} target={base64 ? undefined : '_blank'} rel={base64 ? undefined : 'noreferrer'} className="flex shrink-0 items-center gap-2 rounded-lg bg-gold-500 px-3 py-2 font-body text-xs font-bold text-ink">
                     <Download size={14} /> Retrieve PDF
                   </a>
                 ) : (
-                  <span className="font-body text-xs font-semibold capitalize text-ink-600">{entry.status}</span>
+                  <span className="shrink-0 font-body text-xs font-semibold capitalize text-[#0b2f73]/70">{entry.status}</span>
                 )}
               </div>
             );
@@ -283,30 +302,30 @@ export function VerificationHistoryView({ history, loading }: { history: Verific
   );
 }
 
-// ── Page header, matching the SLT reference screenshots' numbered steps ──
+// ── Page header (tile), matching the SLT reference screenshots ──────
 export function PageHeader({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
-    <header className="mt-5 rounded-2xl border border-blue-400/50 bg-[#0b2f73] p-6">
-      <p className="font-body text-sm font-semibold text-gold-700">Identity services</p>
-      <h1 className="mt-1 font-display text-3xl font-bold text-ink">{title}</h1>
-      {subtitle && <p className="mt-2 font-body text-sm text-ink-600">{subtitle}</p>}
+    <header className="mt-5 rounded-2xl bg-[#0b2f73] p-4 sm:p-6">
+      <p className="font-body text-xs font-semibold text-gold-300 sm:text-sm">Identity services</p>
+      <h1 className="mt-1 font-display text-2xl font-bold text-white sm:text-3xl">{title}</h1>
+      {subtitle && <p className="mt-2 font-body text-sm text-blue-100">{subtitle}</p>}
     </header>
   );
 }
 
 export function StepLabel({ n, children }: { n: number; children: React.ReactNode }) {
   return (
-    <div className="mt-6 flex items-center gap-2 border-b border-parchment-line pb-2">
+    <div className="mt-6 flex items-center gap-2 border-b border-blue-100 pb-2">
       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gold-500 font-body text-xs font-bold text-ink">{n}</span>
-      <h3 className="font-display text-sm font-bold text-ink">{children}</h3>
+      <h3 className="font-display text-sm font-bold text-[#0b2f73]">{children}</h3>
     </div>
   );
 }
 
 export function ConsentCheckbox({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className="mt-5 flex items-start gap-2 font-body text-xs text-ink-600">
-      <input type="checkbox" required checked={checked} onChange={(e) => onChange(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-parchment-line" />
+    <label className="mt-5 flex items-start gap-2 font-body text-xs text-[#0b2f73]/80">
+      <input type="checkbox" required checked={checked} onChange={(e) => onChange(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 rounded border-blue-300 text-[#0b2f73] focus:ring-[#0b2f73]" />
       By checking this box, you agree that the owner of the ID has granted you consent to verify his/her identity.
     </label>
   );

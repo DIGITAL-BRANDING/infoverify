@@ -13,6 +13,9 @@ import {
   useVerificationPrices,
   useVerificationHistory,
   money,
+  FORM_SECTION_CLASSES,
+  FORM_INPUT_CLASSES,
+  FORM_HELP_CLASSES,
   type SlipResult,
 } from '../../components/verification/shared';
 
@@ -104,11 +107,11 @@ export default function NinPhoneVerificationPage() {
       <div className="mx-auto max-w-4xl">
         <PageHeader title="NIN_Phone Verification" subtitle="Verify a NIN directly, or look one up by its registered phone number." />
 
-        <section className="mt-6 rounded-2xl border border-blue-400/50 bg-[#0b2f73] p-6">
+        <section className={FORM_SECTION_CLASSES}>
           {!result ? (
             <form onSubmit={prepare}>
               <StepLabel n={1}>Choose Verification Method</StepLabel>
-              <div className="mt-3 flex gap-6 font-body text-sm font-medium text-ink">
+              <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 font-body text-sm font-medium text-[#0b2f73]">
                 <label className="flex items-center gap-2">
                   <input type="radio" checked={method === 'nin'} onChange={() => { setMethod('nin'); setIdValue(''); setMessage(''); }} /> NIN ID
                 </label>
@@ -123,11 +126,11 @@ export default function NinPhoneVerificationPage() {
                 inputMode="numeric"
                 maxLength={11}
                 placeholder={method === 'nin' ? 'Enter NIN' : 'Enter Phone Number'}
-                className="mt-3 w-full rounded-xl border border-parchment-line bg-cream p-3 text-ink outline-none focus:border-gold-500"
+                className={`mt-3 ${FORM_INPUT_CLASSES}`}
                 value={idValue}
                 onChange={(e) => setIdValue(e.target.value)}
               />
-              <p className="mt-1 font-body text-xs text-ink-600">
+              <p className={`mt-1 ${FORM_HELP_CLASSES}`}>
                 {method === 'nin' ? 'Enter your 11-digit NIN (e.g., 12345678901)' : 'Enter your 11-digit phone number starting with 0 (e.g., 08012345678)'}
               </p>
 
@@ -148,13 +151,13 @@ export default function NinPhoneVerificationPage() {
 
               <ConsentCheckbox checked={consent} onChange={setConsent} />
 
-              <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-                <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">Service cost: {money(price)}</span>
-                <button disabled={busy || !consent} className="flex items-center justify-center gap-2 rounded-xl bg-gold-500 px-6 py-3 font-display font-semibold text-ink disabled:opacity-60">
+              <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span className="rounded-full bg-gold-500/15 px-4 py-2 text-center font-body text-sm font-bold text-gold-700">Service cost: {money(price)}</span>
+                <button disabled={busy || !consent} className="flex w-full items-center justify-center gap-2 rounded-xl bg-gold-500 px-6 py-3 font-display font-semibold text-ink disabled:opacity-60 sm:w-auto">
                   {busy ? <Loader2 size={16} className="animate-spin" /> : 'Verify'}
                 </button>
               </div>
-              {message && <p className="mt-3 rounded-lg bg-cream p-3 font-body text-sm text-ink-600">{message}</p>}
+              {message && <p className="mt-3 rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>}
             </form>
           ) : (
             <SlipResultView

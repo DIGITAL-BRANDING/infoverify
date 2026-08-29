@@ -13,6 +13,11 @@ import {
   useVerificationHistory,
   useTicketPolling,
   money,
+  FORM_SECTION_CLASSES,
+  FORM_INPUT_CLASSES,
+  FORM_HELP_CLASSES,
+  TILE_CLASSES,
+  TILE_SELECTED_CLASSES,
   type AsyncResult,
   type TicketStatus,
 } from '../../components/verification/shared';
@@ -94,39 +99,25 @@ export default function ValidationPage() {
           <Info size={14} /> What is Validation?
         </button>
 
-        <section className="mt-6 rounded-2xl border border-blue-400/50 bg-[#0b2f73] p-6">
+        <section className={FORM_SECTION_CLASSES}>
           {!asyncResult ? (
             <form onSubmit={prepare}>
               <StepLabel n={1}>Details Needed</StepLabel>
-              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
                 {DETAILS.map((d) => (
-                  <button
-                    key={d.value}
-                    type="button"
-                    onClick={() => setDetail(d.value)}
-                    className={`rounded-xl border p-4 text-center transition hover:-translate-y-0.5 ${
-                      detail === d.value ? 'border-[#8b6914] bg-[#6b4f0b] text-white shadow-md' : 'border-parchment-line bg-cream text-ink hover:border-gold-500'
-                    }`}
-                  >
-                    <span className="block text-sm font-semibold">{d.label}</span>
-                    <span className={`mt-1 block text-xs font-bold ${detail === d.value ? 'text-[#ffe9a3]' : 'text-gold-700'}`}>{money(prices[d.serviceKey])}</span>
+                  <button key={d.value} type="button" onClick={() => setDetail(d.value)} className={`${TILE_CLASSES} ${detail === d.value ? TILE_SELECTED_CLASSES : ''}`}>
+                    <span className="block text-xs font-semibold sm:text-sm">{d.label}</span>
+                    <span className="mt-1 block text-xs font-bold text-gold-300">{money(prices[d.serviceKey])}</span>
                   </button>
                 ))}
               </div>
 
               <StepLabel n={2}>Slip Type</StepLabel>
-              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
                 {SLIP_TYPES.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setSlipType(s)}
-                    className={`rounded-xl border p-4 text-center transition hover:-translate-y-0.5 ${
-                      slipType === s ? 'border-[#8b6914] bg-[#6b4f0b] text-white shadow-md' : 'border-parchment-line bg-cream text-ink hover:border-gold-500'
-                    }`}
-                  >
-                    <span className="block text-sm font-semibold">{SLIP_LABEL[s]}</span>
-                    <span className={`mt-1 block text-xs font-bold ${slipType === s ? 'text-[#ffe9a3]' : 'text-gold-700'}`}>{s === 'no-slip' ? money(0) : 'Coming soon'}</span>
+                  <button key={s} type="button" onClick={() => setSlipType(s)} className={`${TILE_CLASSES} ${slipType === s ? TILE_SELECTED_CLASSES : ''}`}>
+                    <span className="block text-xs font-semibold sm:text-sm">{SLIP_LABEL[s]}</span>
+                    <span className="mt-1 block text-xs font-bold text-gold-300">{s === 'no-slip' ? money(0) : 'Coming soon'}</span>
                   </button>
                 ))}
               </div>
@@ -137,21 +128,21 @@ export default function ValidationPage() {
                 inputMode="numeric"
                 maxLength={11}
                 placeholder="NIN Number (11 digits)"
-                className="mt-3 w-full rounded-xl border border-parchment-line bg-cream p-3 text-ink outline-none focus:border-gold-500"
+                className={`mt-3 ${FORM_INPUT_CLASSES}`}
                 value={nin}
                 onChange={(e) => setNin(e.target.value)}
               />
-              <p className="mt-1 font-body text-xs text-ink-600">Enter your 11-digit NIN (e.g., 12345678901)</p>
+              <p className={`mt-1 ${FORM_HELP_CLASSES}`}>Enter your 11-digit NIN (e.g., 12345678901)</p>
 
               <ConsentCheckbox checked={consent} onChange={setConsent} />
 
-              <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-                <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">Service cost: {money(price)}</span>
-                <button disabled={busy || !consent} className="flex items-center justify-center gap-2 rounded-xl bg-gold-500 px-6 py-3 font-display font-semibold text-ink disabled:opacity-60">
+              <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span className="rounded-full bg-gold-500/15 px-4 py-2 text-center font-body text-sm font-bold text-gold-700">Service cost: {money(price)}</span>
+                <button disabled={busy || !consent} className="flex w-full items-center justify-center gap-2 rounded-xl bg-gold-500 px-6 py-3 font-display font-semibold text-ink disabled:opacity-60 sm:w-auto">
                   {busy ? <Loader2 size={16} className="animate-spin" /> : 'Submit Verification'}
                 </button>
               </div>
-              {message && <p className="mt-3 rounded-lg bg-cream p-3 font-body text-sm text-ink-600">{message}</p>}
+              {message && <p className="mt-3 rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>}
             </form>
           ) : (
             <AsyncResultView
@@ -179,12 +170,12 @@ export default function ValidationPage() {
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border-2 border-gold-500 text-gold-700">
               <Info size={22} />
             </div>
-            <h3 className="mt-4 font-display text-lg font-bold text-ink">Warning</h3>
-            <p className="mt-3 font-body text-sm text-ink-600">
+            <h3 className="mt-4 font-display text-lg font-bold text-[#0b2f73]">Warning</h3>
+            <p className="mt-3 font-body text-sm text-[#0b2f73]/80">
               Validation is a NIMC service used when a NIN becomes inactive or stops working — most times showing the message "Record Not Found." This type of validation typically
               takes up to 48 working hours to complete.
             </p>
-            <p className="mt-3 font-body text-sm text-ink-600">
+            <p className="mt-3 font-body text-sm text-[#0b2f73]/80">
               <b>NIN Modification Validation</b> is required when updates such as changes to name, date of birth, or phone number are made through the NIMC Self-Service Portal, but
               the system still displays the old details. It usually takes up to 2 weeks (depending on NIMC network).
             </p>
