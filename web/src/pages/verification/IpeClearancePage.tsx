@@ -81,7 +81,7 @@ export default function IpeClearancePage() {
 
   return (
     <AppShell>
-      <div className="verification-blue-page mx-auto max-w-4xl">
+      <div className="mx-auto max-w-4xl">
         <PageHeader title="IPE Clearance (Instant)" />
 
         <section className={FORM_SECTION_CLASSES}>

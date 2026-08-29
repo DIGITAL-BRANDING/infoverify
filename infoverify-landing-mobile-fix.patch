@@ -1,0 +1,132 @@
+From 8b9acade2bfa35996c713a13fa6b382ea4270d05 Mon Sep 17 00:00:00 2001
+From: Claude <dev@infoverify.local>
+Date: Sat, 29 Aug 2026 15:18:19 +0000
+Subject: [PATCH] Fix landing page mobile overlap and invisible text in Why
+ Choose Us cards
+
+---
+ web/src/pages/LandingPage.tsx | 42 +++++++++++++++++++----------------
+ 1 file changed, 23 insertions(+), 19 deletions(-)
+
+diff --git a/web/src/pages/LandingPage.tsx b/web/src/pages/LandingPage.tsx
+index dca8a77..71e2cd1 100644
+--- a/web/src/pages/LandingPage.tsx
++++ b/web/src/pages/LandingPage.tsx
+@@ -163,24 +163,28 @@ export default function MariaLandingPage() {
+           </div>
+           
+           {/* Animated Dashboard Overview Container */}
+-          <div className="relative">
++          <div className="relative mt-10 md:mt-0">
+             {/* Glowing effect behind dashboard */}
+             <div className="absolute -inset-1 bg-gradient-to-r from-amber-500/30 to-[#D4AF37]/20 rounded-2xl blur-xl animate-pulse"></div>
+ 
+-            {/* Floating Badge (Animated) */}
+-            <div className="absolute -top-6 -right-2 sm:-right-4 z-20 bg-white text-slate-800 p-3 rounded-xl shadow-xl border border-slate-100 flex items-center gap-3 animate-bounce [animation-duration:3s]">
+-              <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
++            {/* Floating Badge (Animated) - kept inside the card's bounds on
++                mobile (top-3/right-3) so it can't drift up into the CTA
++                buttons above it once the hero collapses to a single column;
++                the larger negative offset only kicks in from sm: up, where
++                there's a second grid column giving it room to float clear. */}
++            <div className="absolute top-3 right-3 sm:-top-6 sm:-right-4 z-20 bg-white text-slate-800 p-3 rounded-xl shadow-xl border border-slate-100 flex items-center gap-3 max-w-[75%] sm:max-w-none animate-bounce [animation-duration:3s]">
++              <div className="w-8 h-8 shrink-0 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
+                 <ShieldCheck className="w-5 h-5" />
+               </div>
+-              <div>
++              <div className="min-w-0">
+                 <p className="text-xs font-bold leading-tight">Secure Payments</p>
+                 <p className="text-[10px] text-slate-500">256-bit SSL Encrypted</p>
+               </div>
+             </div>
+ 
+-            {/* Floating Instant Delivery Tag */}
+-            <div className="absolute -bottom-5 -left-2 sm:-left-4 z-20 bg-white text-slate-800 px-4 py-2.5 rounded-xl shadow-xl border border-slate-100 flex items-center gap-2 animate-pulse">
+-              <Zap className="w-4 h-4 text-amber-500 fill-amber-500" />
++            {/* Floating Instant Delivery Tag - same reasoning as above. */}
++            <div className="absolute bottom-3 left-3 sm:-bottom-5 sm:-left-4 z-20 bg-white text-slate-800 px-4 py-2.5 rounded-xl shadow-xl border border-slate-100 flex items-center gap-2 animate-pulse">
++              <Zap className="w-4 h-4 shrink-0 text-amber-500 fill-amber-500" />
+               <div>
+                 <p className="text-xs font-bold">Instant Delivery</p>
+                 <p className="text-[10px] text-slate-500">Under 5 seconds</p>
+@@ -188,7 +192,7 @@ export default function MariaLandingPage() {
+             </div>
+ 
+             {/* Dashboard Card Frame */}
+-            <div className="dashboard-overview relative bg-[#0b2f73] rounded-2xl shadow-2xl p-6 text-white border border-blue-400/50 space-y-5">
++            <div className="dashboard-overview relative z-10 bg-[#0b2f73] rounded-2xl shadow-2xl p-6 pt-10 sm:pt-6 text-white border border-blue-400/50 space-y-5">
+               {/* Top Controls Header */}
+               <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                 <div className="flex items-center gap-2">
+@@ -202,7 +206,7 @@ export default function MariaLandingPage() {
+               {/* Animated Transaction Rows */}
+               <div className="space-y-3">
+                 {/* BVN Services Row */}
+-                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100 transform hover:-translate-y-0.5 transition-all">
++                <div className="flex items-center justify-between p-3 rounded-xl bg-white border border-slate-100 transform hover:-translate-y-0.5 transition-all">
+                   <div className="flex items-center gap-3">
+                     <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                       <Smartphone className="w-5 h-5" />
+@@ -216,7 +220,7 @@ export default function MariaLandingPage() {
+                   <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">₦6,000 - ₦10,000 </span>
+                 </div>
+                 {/* Airtime Row */}
+-                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100 transform hover:-translate-y-0.5 transition-all">
++                <div className="flex items-center justify-between p-3 rounded-xl bg-white border border-slate-100 transform hover:-translate-y-0.5 transition-all">
+                   <div className="flex items-center gap-3">
+                     <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                       <Smartphone className="w-5 h-5" />
+@@ -230,7 +234,7 @@ export default function MariaLandingPage() {
+                 </div>
+ 
+                 {/* Data Row */}
+-                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100 transform hover:-translate-y-0.5 transition-all">
++                <div className="flex items-center justify-between p-3 rounded-xl bg-white border border-slate-100 transform hover:-translate-y-0.5 transition-all">
+                   <div className="flex items-center gap-3">
+                     <div className="w-10 h-10 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
+                       <Wifi className="w-5 h-5" />
+@@ -244,7 +248,7 @@ export default function MariaLandingPage() {
+                 </div>
+ 
+                 {/* Electricity Bill Row */}
+-                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100 transform hover:-translate-y-0.5 transition-all">
++                <div className="flex items-center justify-between p-3 rounded-xl bg-white border border-slate-100 transform hover:-translate-y-0.5 transition-all">
+                   <div className="flex items-center gap-3">
+                     <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+                       <Zap className="w-5 h-5" />
+@@ -342,8 +346,8 @@ export default function MariaLandingPage() {
+               <div className="w-14 h-14 bg-[#0A192F] text-[#D4AF37] rounded-xl flex items-center justify-center mx-auto">
+                 <Zap className="w-8 h-8 text-white" />
+               </div>
+-              <h3 className="text-xl font-bold text-[#0A192F]">Lightning Fast</h3>
+-              <p className="text-slate-600 text-xs leading-relaxed">
++              <h3 className="text-xl font-bold text-white">Lightning Fast</h3>
++              <p className="text-blue-100 text-xs leading-relaxed">
+                 Transactions completed in under 5 seconds with 99.9% uptime guarantee.
+               </p>
+             </div>
+@@ -352,8 +356,8 @@ export default function MariaLandingPage() {
+               <div className="w-14 h-14 bg-[#0A192F] text-[#D4AF37] rounded-xl flex items-center justify-center mx-auto">
+                 <Lock className="w-8 h-8 text-white" />
+               </div>
+-              <h3 className="text-xl font-bold text-[#0A192F]">Secure & Safe</h3>
+-              <p className="text-slate-600 text-xs leading-relaxed">
++              <h3 className="text-xl font-bold text-white">Secure & Safe</h3>
++              <p className="text-blue-100 text-xs leading-relaxed">
+                 Bank-grade encryption and secure payment processing for total peace of mind.
+               </p>
+             </div>
+@@ -362,8 +366,8 @@ export default function MariaLandingPage() {
+               <div className="w-14 h-14 bg-[#0A192F] text-[#D4AF37] rounded-xl flex items-center justify-center mx-auto">
+                 <Headphones className="w-8 h-8 text-white" />
+               </div>
+-              <h3 className="text-xl font-bold text-[#0A192F]">24/7 Support</h3>
+-              <p className="text-slate-600 text-xs leading-relaxed">
++              <h3 className="text-xl font-bold text-white">24/7 Support</h3>
++              <p className="text-blue-100 text-xs leading-relaxed">
+                 Dedicated customer support team available round the clock to assist you.
+               </p>
+             </div>
+-- 
+2.43.0
+
