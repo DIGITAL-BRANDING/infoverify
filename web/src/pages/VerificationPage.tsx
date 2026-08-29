@@ -19,7 +19,7 @@ import AppShell from '../components/AppShell';
 import { api, ApiError } from '../lib/api';
 import { PinConfirmDialog } from '../components/PinConfirmDialog';
 
-type Mode = 'nin' | 'bvn';
+type Mode = 'nin' | 'bvn' | 'delink';
 type Item = {
   id: string;
   label: string;
@@ -122,7 +122,7 @@ type VerificationHistory = {
 
 export default function VerificationPage({ mode }: { mode: Mode }) {
   const nav = useNavigate();
-  const items = mode === 'nin' ? nin : bvn;
+  const items = mode === 'nin' ? nin : mode === 'bvn' ? bvn : nin.filter((item) => item.id === 'delinking');
 
   const [selected, setSelected] = useState<Item | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -137,6 +137,14 @@ export default function VerificationPage({ mode }: { mode: Mode }) {
   const [polling, setPolling] = useState(false);
   const [history, setHistory] = useState<VerificationHistory[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // Self-service unlink is a focused workflow, not the complete NIN catalog.
+  useEffect(() => {
+    if (mode === 'delink') {
+      const item = nin.find((entry) => entry.id === 'delinking');
+      if (item) setSelected(item);
+    }
+  }, [mode]);
 
   useEffect(() => {
     api
@@ -266,10 +274,10 @@ export default function VerificationPage({ mode }: { mode: Mode }) {
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-6xl">
+      <div className="verification-blue-page mx-auto max-w-6xl">
         <button
           onClick={() => {
-            if (selected) {
+            if (selected && mode !== 'delink') {
               setSelected(null);
               resetResult();
             } else {
@@ -278,12 +286,12 @@ export default function VerificationPage({ mode }: { mode: Mode }) {
           }}
           className="font-body text-sm font-semibold text-gold-700"
         >
-          ← {selected ? 'All services' : 'Dashboard'}
+          ← {selected ? (mode === 'delink' ? 'Dashboard' : 'All services') : 'Dashboard'}
         </button>
 
         <header className="mt-5 rounded-2xl border border-blue-400/50 bg-[#0b2f73] p-6">
           <p className="font-body text-sm font-semibold text-gold-700">Identity services</p>
-          <h1 className="mt-1 font-display text-3xl font-bold text-ink">{mode === 'nin' ? 'NIN Services' : 'BVN Services'}</h1>
+          <h1 className="mt-1 font-display text-3xl font-bold text-ink">{mode === 'nin' ? 'NIN Services' : mode === 'bvn' ? 'BVN Services' : 'Self Service Unlink'}</h1>
           <p className="mt-2 font-body text-sm text-ink-600">
             Select a service, see its current price, then continue securely with your transaction PIN.
           </p>

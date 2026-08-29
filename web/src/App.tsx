@@ -85,7 +85,7 @@ export default function App() {
           <Route path="/nin-modification" element={<ProtectedRoute><NinModificationPage /></ProtectedRoute>} />
           <Route path="/modification" element={<ProtectedRoute><NinModificationPage /></ProtectedRoute>} />
           <Route path="/tracking" element={<ProtectedRoute><PersonalizationPage /></ProtectedRoute>} />
-          <Route path="/delink" element={<ProtectedRoute><VerificationPage mode="nin" /></ProtectedRoute>} />
+          <Route path="/delink" element={<ProtectedRoute><VerificationPage mode="delink" /></ProtectedRoute>} />
           <Route path="/bvn-ret" element={<ProtectedRoute><BvnRetrievalPage /></ProtectedRoute>} />
           <Route path="/terms" element={<PrivacyRedirect page="terms" />} />
           <Route path="/fund-wallet" element={<ProtectedRoute><FundWalletPage /></ProtectedRoute>} />
