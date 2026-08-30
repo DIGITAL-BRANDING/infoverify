@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import WhatsappFloat from '../components/WhatsappFloat';
 import { 
   Phone, 
   Mail, 
@@ -492,6 +493,7 @@ export default function MariaLandingPage() {
           </div>
         </div>
       </footer>
+      <WhatsappFloat />
     </div>
   );
 }
