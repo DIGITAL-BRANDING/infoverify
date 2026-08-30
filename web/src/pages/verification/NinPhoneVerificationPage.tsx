@@ -42,6 +42,21 @@ const PHONE_TIER_LABELS: Record<PhoneTier, string> = {
 const NIN_TIER_ICON: Record<NinTier, SlipIconVariant> = { information: 'document', regular: 'regular', standard: 'standard', premium: 'premium', vnin: 'premium' };
 const PHONE_TIER_ICON: Record<PhoneTier, SlipIconVariant> = { regular: 'regular', standard: 'standard', premium: 'premium' };
 
+// Real sample-slip photos, dropped in public/branding by the team — take
+// priority over the SlipIcon SVGs above (still kept as a fallback in shared.tsx).
+const NIN_TIER_IMAGE: Record<NinTier, string> = {
+  information: '/branding/information slip.jpg',
+  regular: '/branding/regular slip.jpg',
+  standard: '/branding/standard slip.jpg',
+  premium: '/branding/premium slip.jpg',
+  vnin: '/branding/Vnin slip.jpg',
+};
+const PHONE_TIER_IMAGE: Record<PhoneTier, string> = {
+  regular: '/branding/regular slip.jpg',
+  standard: '/branding/standard slip.jpg',
+  premium: '/branding/premium slip.jpg',
+};
+
 // "Information Slip" isn't wired up on Techhub's side yet (see
 // maria_backend/src/services/techhub.service.ts — TechhubSlipTier only
 // has premium/standard/regular/vnin). It renders here so the page matches
@@ -148,9 +163,19 @@ export default function NinPhoneVerificationPage() {
                     onChange={setNinTier}
                     priceFor={(t) => (t === 'information' ? undefined : prices[NIN_KEY[t]])}
                     iconFor={(t) => NIN_TIER_ICON[t]}
+                    imageFor={(t) => NIN_TIER_IMAGE[t]}
+                    disabledFor={(t) => t === 'information'}
                   />
                 ) : (
-                  <TierCardGrid options={PHONE_TIERS} labels={PHONE_TIER_LABELS} value={phoneTier} onChange={setPhoneTier} priceFor={(t) => prices[PHONE_KEY[t]]} iconFor={(t) => PHONE_TIER_ICON[t]} />
+                  <TierCardGrid
+                    options={PHONE_TIERS}
+                    labels={PHONE_TIER_LABELS}
+                    value={phoneTier}
+                    onChange={setPhoneTier}
+                    priceFor={(t) => prices[PHONE_KEY[t]]}
+                    iconFor={(t) => PHONE_TIER_ICON[t]}
+                    imageFor={(t) => PHONE_TIER_IMAGE[t]}
+                  />
                 )}
               </div>
 

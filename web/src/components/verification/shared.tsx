@@ -126,33 +126,55 @@ export function TierCardGrid<T extends string>({
   onChange,
   priceFor,
   iconFor,
+  imageFor,
+  disabledFor,
+  disabledLabel = 'Coming Soon',
 }: {
   options: readonly T[];
   labels: Record<T, string>;
   value: T;
   onChange: (v: T) => void;
   priceFor: (v: T) => number | undefined;
-  /** Optional per-option preview icon (see SlipIcon) — shown above the label, matching the reference design's little slip images. */
+  /** Optional per-option preview icon (see SlipIcon) — shown above the label, matching the reference design's little slip images. Ignored when imageFor is given. */
   iconFor?: (v: T) => SlipIconVariant;
+  /** Optional per-option real sample-slip photo (path under /public, e.g. /branding/premium slip.jpg) — takes priority over iconFor. */
+  imageFor?: (v: T) => string;
+  /** Optional per-option "not available yet" flag — dims the tile, blocks selection, and shows disabledLabel instead of a price (rather than an endless "Price loading…" for an option with no real price). */
+  disabledFor?: (v: T) => boolean;
+  disabledLabel?: string;
 }) {
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5">
-      {options.map((option) => (
-        <button
-          key={option}
-          type="button"
-          onClick={() => onChange(option)}
-          className={`${TILE_CLASSES} ${value === option ? TILE_SELECTED_CLASSES : ''}`}
-        >
-          {iconFor && (
-            <div className="mb-2 flex justify-center rounded-lg bg-white/10 p-1.5">
-              <SlipIcon variant={iconFor(option)} />
-            </div>
-          )}
-          <span className="block text-xs font-semibold text-white sm:text-sm">{labels[option]}</span>
-          <span className="mt-1 block text-xs font-bold text-gold-300">{money(priceFor(option))}</span>
-        </button>
-      ))}
+      {options.map((option) => {
+        const disabled = disabledFor?.(option) ?? false;
+        return (
+          <button
+            key={option}
+            type="button"
+            disabled={disabled}
+            onClick={() => !disabled && onChange(option)}
+            className={`${TILE_CLASSES} ${value === option && !disabled ? TILE_SELECTED_CLASSES : ''} ${disabled ? 'cursor-not-allowed opacity-60 hover:translate-y-0 hover:brightness-100' : ''}`}
+          >
+            {imageFor ? (
+              <div className="mb-2 overflow-hidden rounded-lg bg-white/10">
+                <img src={imageFor(option)} alt={labels[option]} className="h-16 w-full object-cover" />
+              </div>
+            ) : (
+              iconFor && (
+                <div className="mb-2 flex justify-center rounded-lg bg-white/10 p-1.5">
+                  <SlipIcon variant={iconFor(option)} />
+                </div>
+              )
+            )}
+            <span className="block text-xs font-semibold text-white sm:text-sm">{labels[option]}</span>
+            {disabled ? (
+              <span className="mt-1 block text-xs font-bold text-white/70">{disabledLabel}</span>
+            ) : (
+              <span className="mt-1 block text-xs font-bold text-gold-300">{money(priceFor(option))}</span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }
