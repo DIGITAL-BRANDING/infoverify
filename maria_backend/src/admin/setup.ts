@@ -101,6 +101,13 @@ export async function buildAdminRouter() {
         }
       }
     },
+    assets: {
+      // See public/admin-assets/mobile-fix.css for what this actually does
+      // and why - fixes AdminJS's built-in list tables rendering blank
+      // (checkbox + "..." menu visible, every data column empty) on
+      // narrow/mobile viewports.
+      styles: ['/admin-assets/mobile-fix.css']
+    },
     resources: [
       userResource,
       transactionResource,

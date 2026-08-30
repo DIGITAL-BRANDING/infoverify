@@ -129,6 +129,16 @@ export function createApp() {
     express.static(path.join(process.cwd(), 'public', 'branding'), { maxAge: '1d' })
   );
 
+  // Same reasoning as /branding above: extra CSS injected into the AdminJS
+  // panel (see assets.styles in admin/setup.ts) to fix list tables on
+  // mobile. Short maxAge (not '1d' like /branding) since this file is
+  // actively being tuned right now and we don't want a stale cached copy
+  // masking whether a fix actually landed.
+  app.use(
+    '/admin-assets',
+    express.static(path.join(process.cwd(), 'public', 'admin-assets'), { maxAge: '5m' })
+  );
+
   app.use(rateLimit({
     windowMs: 60_000,
     limit: 120,

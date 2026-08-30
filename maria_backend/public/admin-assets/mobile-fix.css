@@ -1,0 +1,56 @@
+/*
+ * Defensive mobile fix for AdminJS's built-in List view.
+ *
+ * Reported symptom: on a narrow (phone-width) viewport, list pages like
+ * Service Pricing and Referral Settings show rows with a visible checkbox
+ * and "..." actions menu, but every data column in between renders
+ * completely blank - no service name, price, or any other value text.
+ *
+ * IMPORTANT CONTEXT: this exact deployment has a documented history of
+ * serving a STALE/partial AdminJS bundle after a deploy (see the long
+ * comment above `await admin.initialize()` in admin/setup.ts, added after
+ * a previous "Unexpected token" bug from the same root cause: the admin
+ * router could start serving requests before .adminjs/bundle.js had
+ * finished writing). A stale or partial bundle is the single most likely
+ * explanation for list rows silently losing their column content on some
+ * devices while working on others - if this stylesheet is loading (check
+ * the Network tab for admin-assets/mobile-fix.css) and rows are STILL
+ * blank, restart/redeploy the backend service first (forces a fresh
+ * bundle rebuild) and hard-refresh the browser (clears any cached old
+ * bundle) before assuming this CSS needs to be adjusted further.
+ *
+ * What this stylesheet actually fixes: AdminJS's list table not
+ * reflowing for narrow screens, which can visually squeeze column
+ * content into an effectively zero-width box even though the row itself
+ * still renders at full height. Forcing horizontal scroll (rather than
+ * letting columns collapse) means every column stays at a readable
+ * minimum width and the row becomes scrollable instead of blank.
+ */
+@media (max-width: 900px) {
+  table {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100vw;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  table thead,
+  table tbody,
+  table tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+  }
+  table th,
+  table td {
+    min-width: 110px;
+    white-space: nowrap;
+    overflow: visible !important;
+    text-overflow: unset !important;
+  }
+  /* Belt-and-suspenders: make sure no ancestor is accidentally making list
+     text transparent or zero-size. */
+  table, table * {
+    opacity: 1 !important;
+  }
+}
