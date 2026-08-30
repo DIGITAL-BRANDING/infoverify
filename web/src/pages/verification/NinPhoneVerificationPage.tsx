@@ -16,15 +16,19 @@ import {
   FORM_SECTION_CLASSES,
   FORM_INPUT_CLASSES,
   FORM_HELP_CLASSES,
+  PHONE_TIERS,
+  PHONE_TIER_LABELS,
+  PHONE_TIER_ICON,
+  PHONE_TIER_IMAGE,
+  PHONE_KEY,
+  type PhoneTier,
   type SlipIconVariant,
   type SlipResult,
 } from '../../components/verification/shared';
 
 type Method = 'nin' | 'phone';
 const NIN_TIERS = ['information', 'regular', 'standard', 'premium', 'vnin'] as const;
-const PHONE_TIERS = ['regular', 'standard', 'premium'] as const;
 type NinTier = (typeof NIN_TIERS)[number];
-type PhoneTier = (typeof PHONE_TIERS)[number];
 
 const NIN_TIER_LABELS: Record<NinTier, string> = {
   information: 'Information Slip',
@@ -33,14 +37,8 @@ const NIN_TIER_LABELS: Record<NinTier, string> = {
   premium: 'Premium Slip',
   vnin: 'V-NIN Slip',
 };
-const PHONE_TIER_LABELS: Record<PhoneTier, string> = {
-  regular: 'Regular Slip',
-  standard: 'Standard Slip',
-  premium: 'Premium Slip',
-};
 
 const NIN_TIER_ICON: Record<NinTier, SlipIconVariant> = { information: 'document', regular: 'regular', standard: 'standard', premium: 'premium', vnin: 'premium' };
-const PHONE_TIER_ICON: Record<PhoneTier, SlipIconVariant> = { regular: 'regular', standard: 'standard', premium: 'premium' };
 
 // Real sample-slip photos, dropped in public/branding by the team — take
 // priority over the SlipIcon SVGs above (still kept as a fallback in shared.tsx).
@@ -50,11 +48,6 @@ const NIN_TIER_IMAGE: Record<NinTier, string> = {
   standard: '/branding/standard slip.jpg',
   premium: '/branding/premium slip.jpg',
   vnin: '/branding/Vnin slip.jpg',
-};
-const PHONE_TIER_IMAGE: Record<PhoneTier, string> = {
-  regular: '/branding/regular slip.jpg',
-  standard: '/branding/standard slip.jpg',
-  premium: '/branding/premium slip.jpg',
 };
 
 // "Information Slip" isn't wired up on Techhub's side yet (see
@@ -67,11 +60,6 @@ const NIN_KEY: Record<Exclude<NinTier, 'information'>, string> = {
   standard: 'NIN_SLIP_STANDARD',
   premium: 'NIN_SLIP_PREMIUM',
   vnin: 'NIN_SLIP_VNIN',
-};
-const PHONE_KEY: Record<PhoneTier, string> = {
-  regular: 'NIN_PHONE_SLIP_REGULAR',
-  standard: 'NIN_PHONE_SLIP_STANDARD',
-  premium: 'NIN_PHONE_SLIP_PREMIUM',
 };
 
 export default function NinPhoneVerificationPage() {

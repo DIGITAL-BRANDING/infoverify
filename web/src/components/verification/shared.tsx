@@ -19,6 +19,30 @@ export type VerificationHistory = {
 export const money = (amount?: number) =>
   amount === undefined ? 'Price loading…' : `₦${amount.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`;
 
+// ── Shared "NIN by Phone" tier definitions ──────────────────────
+// Used by both NinPhoneVerificationPage's "Phone No" method and the
+// dedicated PhoneMultiplePage, since they hit the exact same
+// POST /verification/nin/by-phone endpoint and NIN_PHONE_SLIP_* prices —
+// kept in one place so the two pages can't drift apart.
+export const PHONE_TIERS = ['regular', 'standard', 'premium'] as const;
+export type PhoneTier = (typeof PHONE_TIERS)[number];
+export const PHONE_TIER_LABELS: Record<PhoneTier, string> = {
+  regular: 'Regular Slip',
+  standard: 'Standard Slip',
+  premium: 'Premium Slip',
+};
+export const PHONE_TIER_ICON: Record<PhoneTier, SlipIconVariant> = { regular: 'regular', standard: 'standard', premium: 'premium' };
+export const PHONE_TIER_IMAGE: Record<PhoneTier, string> = {
+  regular: '/branding/regular slip.jpg',
+  standard: '/branding/standard slip.jpg',
+  premium: '/branding/premium slip.jpg',
+};
+export const PHONE_KEY: Record<PhoneTier, string> = {
+  regular: 'NIN_PHONE_SLIP_REGULAR',
+  standard: 'NIN_PHONE_SLIP_STANDARD',
+  premium: 'NIN_PHONE_SLIP_PREMIUM',
+};
+
 /**
  * Two-tone palette used across every split-out verification page:
  *   - "Tiles" (the intro banner + selectable option cards) are filled solid
