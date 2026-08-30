@@ -21,6 +21,24 @@ const quickLinks: QuickLink[] = [
   { label: 'Customers', description: 'Users, KYC status & profiles', resourceId: 'User', icon: 'Users' },
   { label: 'Ledger', description: 'Transactions, reversals & history', resourceId: 'Transaction', icon: 'List' },
   {
+    label: 'CAC Registration Requests',
+    description: 'Business name/company filings awaiting manual CAC registration',
+    href: `${ADMIN_ROOT_PATH}/resources/Transaction?filters.type=CAC_SERVICE_REQUEST`,
+    icon: 'Briefcase'
+  },
+  {
+    label: 'BVN License Requests',
+    description: 'Agent BVN license enrollments awaiting manual processing',
+    href: `${ADMIN_ROOT_PATH}/resources/Transaction?filters.type=BVN_LICENSE_ONBOARDING`,
+    icon: 'CreditCard'
+  },
+  {
+    label: 'NIN Modification Requests',
+    description: 'Manual NIN correction requests awaiting re-keying on techhubltd.co',
+    href: `${ADMIN_ROOT_PATH}/resources/Transaction?filters.type=NIN_MODIFICATION`,
+    icon: 'Edit'
+  },
+  {
     label: 'User Wallet Activity',
     description: 'Look up any customer: funding, spend & recent transactions',
     href: `${ADMIN_ROOT_PATH}/user-wallet`,
