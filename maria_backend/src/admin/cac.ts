@@ -46,6 +46,19 @@ export function registerCacRoutes(router: Router) {
     const progressNotes = typeof metadata?.progress_notes === 'string' ? metadata.progress_notes : '';
     const isPending = tx.status === 'PENDING';
     const hasCertificate = typeof pii?.certificate_pdf_base64 === 'string' && pii.certificate_pdf_base64.length > 0;
+    const hasSubmissionForm = typeof pii?.submission_pdf_base64 === 'string' && pii.submission_pdf_base64.length > 0;
+
+    const detailRows: [string, string | undefined][] = [
+      ['Nature of business', pii?.business_nature],
+      ['Business address', pii?.business_address],
+      ['Proprietor full name', pii?.proprietor_full_name],
+      ['Proprietor phone', pii?.proprietor_phone],
+      ['Proprietor email', pii?.proprietor_email],
+      ['Proprietor residential address', pii?.proprietor_residential_address],
+      ['Proprietor date of birth', pii?.proprietor_date_of_birth],
+      ['Proprietor gender', pii?.proprietor_gender],
+      ['Proprietor NIN', pii?.proprietor_nin]
+    ];
 
     res.type('html').send(`<!doctype html>
 <html><head><meta charset="utf-8"><title>Manage CAC request ${escapeHtml(tx.reference)}</title>
@@ -55,20 +68,36 @@ export function registerCacRoutes(router: Router) {
   .field { margin-top: 8px; }
   textarea, input[type=file] { width: 100%; box-sizing: border-box; padding: 8px; font: inherit; }
   textarea { min-height: 90px; }
-  button { margin-top: 12px; padding: 10px 18px; font: inherit; cursor: pointer; border: 0; border-radius: 6px; background: #6b4f0b; color: #fff; }
+  button, .btn { margin-top: 12px; padding: 10px 18px; font: inherit; cursor: pointer; border: 0; border-radius: 6px; background: #6b4f0b; color: #fff; display: inline-block; text-decoration: none; }
+  .btn.primary { background: #0b2f73; }
   button:disabled { opacity: .5; cursor: not-allowed; }
   .meta { color: #666; font-size: 13px; }
   .status { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
   .status.PENDING { background: #fff3cd; color: #7a5b00; }
   .status.SUCCESS { background: #d4edda; color: #155724; }
   #msg { margin-top: 12px; font-size: 14px; }
+  table.details { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+  table.details td { padding: 6px 4px; border-bottom: 1px solid #eee; vertical-align: top; }
+  table.details td:first-child { color: #666; width: 42%; }
 </style></head>
 <body>
   <p><a href="/admin/resources/Transaction/records/${tx.id}/show">&larr; Back to transaction</a></p>
   <h1>CAC request — ${escapeHtml(tx.reference)}</h1>
   <p class="meta">Status: <span class="status ${tx.status}">${tx.status}</span> · Type: ${escapeHtml(String(metadata?.cac_type ?? ''))}</p>
   <p class="meta">Proposed name 1: <b>${escapeHtml(pii?.proposed_name_1 ?? '—')}</b><br>Proposed name 2: <b>${escapeHtml(pii?.proposed_name_2 ?? '—')}</b></p>
-  ${hasCertificate ? `<p class="meta">A certificate is already attached. <a href="#" onclick="downloadCert(event)">Download it</a>.</p>` : ''}
+
+  <h2>File this with CAC</h2>
+  <p class="meta">Every detail the customer submitted, laid out as a printable form - download this before registering the business on the CAC portal.</p>
+  ${
+    hasSubmissionForm
+      ? `<a href="#" class="btn primary" onclick="downloadForm(event)">Download submission form (PDF)</a>`
+      : `<p class="meta"><i>No submission form was generated for this request (it may predate this feature).</i></p>`
+  }
+  <table class="details">
+    ${detailRows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(value ?? '—')}</td></tr>`).join('')}
+  </table>
+
+  ${hasCertificate ? `<p class="meta" style="margin-top:16px">A completed certificate is already attached. <a href="#" onclick="downloadCert(event)">Download it</a>.</p>` : ''}
 
   <h2>Progress note</h2>
   <p class="meta">Visible to the customer on their CAC history table. Save this any time while the request is pending.</p>
@@ -85,6 +114,7 @@ export function registerCacRoutes(router: Router) {
 <script>
   const txId = ${JSON.stringify(tx.id)};
   const certBase64 = ${JSON.stringify(hasCertificate ? pii!.certificate_pdf_base64 : null)};
+  const formBase64 = ${JSON.stringify(hasSubmissionForm ? pii!.submission_pdf_base64 : null)};
   const msg = document.getElementById('msg');
 
   function downloadCert(e) {
@@ -92,7 +122,16 @@ export function registerCacRoutes(router: Router) {
     if (!certBase64) return;
     const a = document.createElement('a');
     a.href = 'data:application/pdf;base64,' + certBase64;
-    a.download = ${JSON.stringify(tx.reference)} + '.pdf';
+    a.download = ${JSON.stringify(tx.reference)} + '-certificate.pdf';
+    a.click();
+  }
+
+  function downloadForm(e) {
+    e.preventDefault();
+    if (!formBase64) return;
+    const a = document.createElement('a');
+    a.href = 'data:application/pdf;base64,' + formBase64;
+    a.download = ${JSON.stringify(tx.reference)} + '-submission-form.pdf';
     a.click();
   }
 

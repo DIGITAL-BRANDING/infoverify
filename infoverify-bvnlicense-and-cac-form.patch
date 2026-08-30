@@ -1,0 +1,878 @@
+From 27b2449ad2fff40936fd15d0c8cfaf7e8400f1ab Mon Sep 17 00:00:00 2001
+From: Claude <dev@infoverify.local>
+Date: Sun, 30 Aug 2026 15:13:57 +0000
+Subject: [PATCH] Rebuild BVN License Onboarding form to match paper form
+ fields; add full applicant details + downloadable submission PDF to CAC
+ Services for admin filing
+
+---
+ maria_backend/src/admin/cac.ts                |  45 ++-
+ .../src/routes/verification.routes.ts         |  67 +++--
+ maria_backend/src/services/cac.service.ts     | 125 +++++++-
+ web/src/App.tsx                               |   2 +
+ web/src/pages/verification/BvnLicensePage.tsx | 268 ++++++++++++++++++
+ .../pages/verification/CacServicesPage.tsx    |  92 +++++-
+ 6 files changed, 566 insertions(+), 33 deletions(-)
+ create mode 100644 web/src/pages/verification/BvnLicensePage.tsx
+
+diff --git a/maria_backend/src/admin/cac.ts b/maria_backend/src/admin/cac.ts
+index 815a351..bc4db51 100644
+--- a/maria_backend/src/admin/cac.ts
++++ b/maria_backend/src/admin/cac.ts
+@@ -46,6 +46,19 @@ export function registerCacRoutes(router: Router) {
+     const progressNotes = typeof metadata?.progress_notes === 'string' ? metadata.progress_notes : '';
+     const isPending = tx.status === 'PENDING';
+     const hasCertificate = typeof pii?.certificate_pdf_base64 === 'string' && pii.certificate_pdf_base64.length > 0;
++    const hasSubmissionForm = typeof pii?.submission_pdf_base64 === 'string' && pii.submission_pdf_base64.length > 0;
++
++    const detailRows: [string, string | undefined][] = [
++      ['Nature of business', pii?.business_nature],
++      ['Business address', pii?.business_address],
++      ['Proprietor full name', pii?.proprietor_full_name],
++      ['Proprietor phone', pii?.proprietor_phone],
++      ['Proprietor email', pii?.proprietor_email],
++      ['Proprietor residential address', pii?.proprietor_residential_address],
++      ['Proprietor date of birth', pii?.proprietor_date_of_birth],
++      ['Proprietor gender', pii?.proprietor_gender],
++      ['Proprietor NIN', pii?.proprietor_nin]
++    ];
+ 
+     res.type('html').send(`<!doctype html>
+ <html><head><meta charset="utf-8"><title>Manage CAC request ${escapeHtml(tx.reference)}</title>
+@@ -55,20 +68,36 @@ export function registerCacRoutes(router: Router) {
+   .field { margin-top: 8px; }
+   textarea, input[type=file] { width: 100%; box-sizing: border-box; padding: 8px; font: inherit; }
+   textarea { min-height: 90px; }
+-  button { margin-top: 12px; padding: 10px 18px; font: inherit; cursor: pointer; border: 0; border-radius: 6px; background: #6b4f0b; color: #fff; }
++  button, .btn { margin-top: 12px; padding: 10px 18px; font: inherit; cursor: pointer; border: 0; border-radius: 6px; background: #6b4f0b; color: #fff; display: inline-block; text-decoration: none; }
++  .btn.primary { background: #0b2f73; }
+   button:disabled { opacity: .5; cursor: not-allowed; }
+   .meta { color: #666; font-size: 13px; }
+   .status { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+   .status.PENDING { background: #fff3cd; color: #7a5b00; }
+   .status.SUCCESS { background: #d4edda; color: #155724; }
+   #msg { margin-top: 12px; font-size: 14px; }
++  table.details { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
++  table.details td { padding: 6px 4px; border-bottom: 1px solid #eee; vertical-align: top; }
++  table.details td:first-child { color: #666; width: 42%; }
+ </style></head>
+ <body>
+   <p><a href="/admin/resources/Transaction/records/${tx.id}/show">&larr; Back to transaction</a></p>
+   <h1>CAC request — ${escapeHtml(tx.reference)}</h1>
+   <p class="meta">Status: <span class="status ${tx.status}">${tx.status}</span> · Type: ${escapeHtml(String(metadata?.cac_type ?? ''))}</p>
+   <p class="meta">Proposed name 1: <b>${escapeHtml(pii?.proposed_name_1 ?? '—')}</b><br>Proposed name 2: <b>${escapeHtml(pii?.proposed_name_2 ?? '—')}</b></p>
+-  ${hasCertificate ? `<p class="meta">A certificate is already attached. <a href="#" onclick="downloadCert(event)">Download it</a>.</p>` : ''}
++
++  <h2>File this with CAC</h2>
++  <p class="meta">Every detail the customer submitted, laid out as a printable form - download this before registering the business on the CAC portal.</p>
++  ${
++    hasSubmissionForm
++      ? `<a href="#" class="btn primary" onclick="downloadForm(event)">Download submission form (PDF)</a>`
++      : `<p class="meta"><i>No submission form was generated for this request (it may predate this feature).</i></p>`
++  }
++  <table class="details">
++    ${detailRows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(value ?? '—')}</td></tr>`).join('')}
++  </table>
++
++  ${hasCertificate ? `<p class="meta" style="margin-top:16px">A completed certificate is already attached. <a href="#" onclick="downloadCert(event)">Download it</a>.</p>` : ''}
+ 
+   <h2>Progress note</h2>
+   <p class="meta">Visible to the customer on their CAC history table. Save this any time while the request is pending.</p>
+@@ -85,6 +114,7 @@ export function registerCacRoutes(router: Router) {
+ <script>
+   const txId = ${JSON.stringify(tx.id)};
+   const certBase64 = ${JSON.stringify(hasCertificate ? pii!.certificate_pdf_base64 : null)};
++  const formBase64 = ${JSON.stringify(hasSubmissionForm ? pii!.submission_pdf_base64 : null)};
+   const msg = document.getElementById('msg');
+ 
+   function downloadCert(e) {
+@@ -92,7 +122,16 @@ export function registerCacRoutes(router: Router) {
+     if (!certBase64) return;
+     const a = document.createElement('a');
+     a.href = 'data:application/pdf;base64,' + certBase64;
+-    a.download = ${JSON.stringify(tx.reference)} + '.pdf';
++    a.download = ${JSON.stringify(tx.reference)} + '-certificate.pdf';
++    a.click();
++  }
++
++  function downloadForm(e) {
++    e.preventDefault();
++    if (!formBase64) return;
++    const a = document.createElement('a');
++    a.href = 'data:application/pdf;base64,' + formBase64;
++    a.download = ${JSON.stringify(tx.reference)} + '-submission-form.pdf';
+     a.click();
+   }
+ 
+diff --git a/maria_backend/src/routes/verification.routes.ts b/maria_backend/src/routes/verification.routes.ts
+index 7dd7aed..2505088 100644
+--- a/maria_backend/src/routes/verification.routes.ts
++++ b/maria_backend/src/routes/verification.routes.ts
+@@ -72,12 +72,23 @@ verificationRoutes.get('/prices', async (_req, res) => {
+ 
+ verificationRoutes.post('/bvn/license-onboarding', async (req, res) => {
+   const body = z.object({
+-    agent_location: z.string().trim().min(2), agent_bvn: z.string().trim().length(11),
+-    account_number: z.string().trim().min(10).max(12), bank_name: z.string().trim().min(2),
+-    first_name: z.string().trim().min(1), last_name: z.string().trim().min(1),
+-    email: z.string().trim().email(), phone_number: z.string().trim().length(11),
+-    date_of_birth: z.string().trim().min(8), address: z.string().trim().min(3),
+-    lga: z.string().trim().min(2), state_of_residence: z.string().trim().min(2),
++    agent_location: z.string().trim().min(2),
++    bvn: z.string().trim().length(11),
++    nin: z.string().trim().length(11),
++    first_name: z.string().trim().min(1),
++    last_name: z.string().trim().min(1),
++    middle_name: z.string().trim().max(100).optional(),
++    phone_number: z.string().trim().length(11),
++    date_of_birth: z.string().trim().min(8),
++    email: z.string().trim().email(),
++    alternative_email: z.string().trim().email().optional().or(z.literal('')),
++    account_number: z.string().trim().min(10).max(12),
++    bank_name: z.string().trim().min(2),
++    account_name: z.string().trim().min(2),
++    address: z.string().trim().min(3),
++    city: z.string().trim().min(2),
++    lga: z.string().trim().min(2),
++    state_of_residence: z.string().trim().min(2),
+     geo_political_zone: z.enum(GEO_POLITICAL_ZONES), consent: z.literal(true), ...pinField
+   }).parse(req.body);
+   await requirePinConfirmation(req.user!.id, body.pin);
+@@ -87,23 +98,32 @@ verificationRoutes.post('/bvn/license-onboarding', async (req, res) => {
+ });
+ 
+ verificationRoutes.get('/bvn/license-onboarding/history', async (req, res) => {
+-  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
++  // A manual onboarding request may sit PENDING for days while an admin
++  // processes it - unlike GET /history above, this deliberately does NOT
++  // filter to status: SUCCESS only, so a customer can see (and download the
++  // submission PDF for) a request that's still in progress, not just
++  // completed ones. Same reasoning as listServiceTickets() in
++  // verification.service.ts, just for the BVN_LICENSE_ONBOARDING
++  // transaction type specifically, which that helper doesn't cover.
++  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+   const rows = await prisma.transaction.findMany({
+     where: {
+       userId: req.user!.id,
+       type: TransactionType.BVN_LICENSE_ONBOARDING,
+-      status: TransactionStatus.SUCCESS,
+-      updatedAt: { gte: since }
++      createdAt: { gte: since }
+     },
+-    orderBy: { updatedAt: 'desc' }, take: 20
++    orderBy: { createdAt: 'desc' }, take: 20
+   });
+   res.json({ status: true, data: rows.map((tx) => {
+     const metadata = tx.metadata as Record<string, unknown> | null;
+-    return { reference: tx.reference, tracking_id: metadata?.tracking_id ?? null,
+-      status: tx.status.toLowerCase(), amount: Number(tx.amountKobo) / 100,
+-      // A manual onboarding request may sit pending for days. Its seven-day
+-      // activity window starts only once an admin marks it successful.
+-      created_at: tx.updatedAt.toISOString() };
++    return {
++      reference: tx.reference,
++      tracking_id: metadata?.tracking_id ?? null,
++      status: tx.status.toLowerCase(),
++      amount: Number(tx.amountKobo) / 100,
++      pdf_base64: typeof metadata?.pdf_base64 === 'string' ? metadata.pdf_base64 : null,
++      created_at: tx.createdAt.toISOString()
++    };
+   }) });
+ });
+ 
+@@ -351,15 +371,26 @@ verificationRoutes.post('/cac', async (req, res) => {
+       cac_type: z.enum(CAC_TYPES),
+       proposed_name_1: z.string().trim().min(2).max(200),
+       proposed_name_2: z.string().trim().max(200).optional(),
++      business_nature: z.string().trim().min(2).max(300),
++      business_address: z.string().trim().min(3).max(300),
++      proprietor_full_name: z.string().trim().min(2).max(200),
++      proprietor_phone: z.string().trim().length(11),
++      proprietor_email: z.string().trim().email(),
++      proprietor_residential_address: z.string().trim().min(3).max(300),
++      proprietor_date_of_birth: z.string().trim().min(8),
++      proprietor_gender: z.enum(['Male', 'Female']),
++      proprietor_nin: z.string().trim().length(11),
+       ...pinField
+     })
+     .parse(req.body);
+   await requirePinConfirmation(req.user!.id, body.pin);
++  const { pin: _pin, cac_type, proposed_name_1, proposed_name_2, ...details } = body;
+   const result = await submitCacRequest({
+     userId: req.user!.id,
+-    type: body.cac_type as CacType,
+-    proposedName1: body.proposed_name_1,
+-    proposedName2: body.proposed_name_2,
++    type: cac_type as CacType,
++    proposedName1: proposed_name_1,
++    proposedName2: proposed_name_2,
++    details,
+     idempotencyKey: idempotencyKeyFrom(req)
+   });
+   res.json({ status: true, data: { reference: result.reference, balance_after: result.balanceAfter } });
+diff --git a/maria_backend/src/services/cac.service.ts b/maria_backend/src/services/cac.service.ts
+index 21ecd4f..ecf5e42 100644
+--- a/maria_backend/src/services/cac.service.ts
++++ b/maria_backend/src/services/cac.service.ts
+@@ -1,3 +1,4 @@
++import PDFDocument from 'pdfkit';
+ import { Prisma, TransactionStatus, TransactionType } from '@prisma/client';
+ import { koboToNaira } from '../lib/money.js';
+ import { sealPII, openPII, mergeSealedPII } from '../lib/pii.js';
+@@ -12,14 +13,18 @@ import { debitWallet } from './wallet.service.js';
+  * which go through Techhub). It follows the exact same manual pattern as NIN
+  * Modification (see nin-modification.service.ts) and BVN License Onboarding:
+  * the customer is debited at submission, the transaction sits PENDING, and an
+- * admin does the actual CAC filing by hand. Two things an admin can do from
+- * the Transaction page while it's PENDING (see admin/cac.ts):
++ * admin does the actual CAC filing by hand. Three things an admin can do from
++ * the "manage" page (see admin/cac.ts):
++ *   - Download the auto-generated submission PDF (every field the customer
++ *     supplied) - this is what they'd actually take to the CAC portal to
++ *     register the business, same idea as BVN License Onboarding's
++ *     submission PDF.
+  *   - Save progress notes, visible to the customer on their history table
+  *     (matches the reference design's "Progress Notes" column).
+- *   - Mark it complete and attach the final certificate PDF, which the
+- *     customer can then download - this is the one difference from NIN
+- *     Modification, where the "PDF" is just a record of the submission, not
+- *     a genuine end-of-process CAC document.
++ *   - Mark it complete and attach the FINAL certificate PDF (the one CAC
++ *     issues once registration is done), which the customer can then
++ *     download - this is a second, separate PDF from the submission one
++ *     above.
+  *
+  * "Company more than 1M, NGO, Clubs, Association, Etc." has no fixed price
+  * in the reference design ("quote on request") and isn't included in
+@@ -35,6 +40,25 @@ const CAC_CONFIG: Record<CacType, { title: string; price: number }> = {
+   llc: { title: 'Limited Liability — 1M Share', price: 40000 }
+ };
+ 
++/**
++ * The applicant/proprietor details actually needed to file with CAC - a
++ * business name/company alone isn't enough to register anything. Kept as a
++ * flat, mostly-generic dict (like BvnLicenseInput in
++ * bvn-license-onboarding.service.ts) so the submission PDF can just loop
++ * over every field without a hand-maintained render function per field.
++ */
++export type CacApplicantDetails = {
++  business_nature: string;
++  business_address: string;
++  proprietor_full_name: string;
++  proprietor_phone: string;
++  proprietor_email: string;
++  proprietor_residential_address: string;
++  proprietor_date_of_birth: string;
++  proprietor_gender: 'Male' | 'Female';
++  proprietor_nin: string;
++};
++
+ function serviceKeyFor(type: CacType) {
+   return `CAC_${type.toUpperCase()}`;
+ }
+@@ -90,6 +114,62 @@ export async function listCacPrices() {
+   }));
+ }
+ 
++function createCacReference() {
++  return `CAC-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
++}
++
++/** Renders every submitted field into a simple PDF the admin can print or
++ *  upload straight into the CAC portal's forms - same pattern as
++ *  bvn-license-onboarding.service.ts's renderPdf. */
++async function renderSubmissionPdf(params: {
++  cacType: CacType;
++  proposedName1: string;
++  proposedName2?: string | null;
++  details: CacApplicantDetails;
++  trackingRef: string;
++}) {
++  const doc = new PDFDocument({ size: 'A4', margin: 48 });
++  const chunks: Buffer[] = [];
++  doc.on('data', (c: Buffer) => chunks.push(c));
++  const done = new Promise<string>((resolve, reject) => {
++    doc.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
++    doc.on('error', reject);
++  });
++
++  doc.fontSize(18).fillColor('#0b2f73').text('CAC Business Registration — Submission Form', { align: 'center' });
++  doc.moveDown();
++  doc.fontSize(10).fillColor('#374151').text(`Reference: ${params.trackingRef}`);
++  doc.text(`Submitted: ${new Date().toISOString()}`);
++  doc.text(`Registration type: ${CAC_CONFIG[params.cacType].title}`);
++  doc.moveDown();
++
++  doc.fontSize(13).fillColor('#0b2f73').text('Proposed Business Name(s)');
++  doc.fontSize(10).fillColor('#374151').text(`Option 1: ${params.proposedName1}`);
++  if (params.proposedName2) doc.text(`Option 2: ${params.proposedName2}`);
++  doc.moveDown();
++
++  doc.fontSize(13).fillColor('#0b2f73').text('Business Details');
++  doc.fontSize(10).fillColor('#374151');
++  doc.text(`Nature of business: ${params.details.business_nature}`);
++  doc.text(`Business address: ${params.details.business_address}`);
++  doc.moveDown();
++
++  doc.fontSize(13).fillColor('#0b2f73').text('Proprietor / Applicant Details');
++  doc.fontSize(10).fillColor('#374151');
++  doc.text(`Full name: ${params.details.proprietor_full_name}`);
++  doc.text(`Phone: ${params.details.proprietor_phone}`);
++  doc.text(`Email: ${params.details.proprietor_email}`);
++  doc.text(`Residential address: ${params.details.proprietor_residential_address}`);
++  doc.text(`Date of birth: ${params.details.proprietor_date_of_birth}`);
++  doc.text(`Gender: ${params.details.proprietor_gender}`);
++  doc.text(`NIN: ${params.details.proprietor_nin}`);
++
++  doc.moveDown(2);
++  doc.fontSize(9).fillColor('#6b7280').text('Generated automatically at submission time for manual CAC filing. Not a CAC certificate.');
++  doc.end();
++  return done;
++}
++
+ export type SubmitCacResult = { reference: string; balanceAfter: number };
+ 
+ export async function submitCacRequest(params: {
+@@ -97,11 +177,21 @@ export async function submitCacRequest(params: {
+   type: CacType;
+   proposedName1: string;
+   proposedName2?: string;
++  details: CacApplicantDetails;
+   idempotencyKey?: string;
+ }): Promise<SubmitCacResult> {
+   const config = CAC_CONFIG[params.type];
+   const price = await getCacPrice(params.type);
+   const service = serviceKeyFor(params.type);
++  const trackingRef = createCacReference();
++
++  const submissionPdfBase64 = await renderSubmissionPdf({
++    cacType: params.type,
++    proposedName1: params.proposedName1,
++    proposedName2: params.proposedName2,
++    details: params.details,
++    trackingRef
++  });
+ 
+   const debit = await debitWallet({
+     userId: params.userId,
+@@ -113,7 +203,13 @@ export async function submitCacRequest(params: {
+       cac_type: params.type,
+       unit_price: price.unitPrice,
+       progress_notes: null,
+-      pii: sealPII({ proposed_name_1: params.proposedName1, proposed_name_2: params.proposedName2 ?? null })
++      tracking_ref: trackingRef,
++      pii: sealPII({
++        proposed_name_1: params.proposedName1,
++        proposed_name_2: params.proposedName2 ?? null,
++        ...params.details,
++        submission_pdf_base64: submissionPdfBase64
++      })
+     } as Prisma.InputJsonValue,
+     idempotencyKey: params.idempotencyKey,
+     // No provider was actually paid yet - an admin pays CAC's fee when they
+@@ -132,11 +228,19 @@ export type CacHistoryEntry = {
+   proposed_name_2: string | null;
+   amount: number;
+   progress_notes: string | null;
++  submission_pdf_base64: string | null;
+   certificate_pdf_base64: string | null;
+   created_at: string;
+   updated_at: string;
+ };
+ 
++type CacPII = Partial<CacApplicantDetails> & {
++  proposed_name_1?: string;
++  proposed_name_2?: string | null;
++  submission_pdf_base64?: string;
++  certificate_pdf_base64?: string;
++};
++
+ /**
+  * Unlike NIN Modification's history (which only ever shows SUCCESS rows,
+  * see listModificationHistory), CAC registration can take days - the whole
+@@ -153,7 +257,7 @@ export async function listCacHistory(userId: string) {
+ 
+   return transactions.map((transaction): CacHistoryEntry => {
+     const metadata = transaction.metadata as Record<string, unknown> | null;
+-    const pii = openPII<{ proposed_name_1?: string; proposed_name_2?: string | null; certificate_pdf_base64?: string }>(metadata?.pii);
++    const pii = openPII<CacPII>(metadata?.pii);
+     return {
+       reference: transaction.reference,
+       status: transaction.status.toLowerCase(),
+@@ -162,6 +266,7 @@ export async function listCacHistory(userId: string) {
+       proposed_name_2: pii?.proposed_name_2 ?? null,
+       amount: koboToNaira(transaction.amountKobo),
+       progress_notes: typeof metadata?.progress_notes === 'string' ? metadata.progress_notes : null,
++      submission_pdf_base64: typeof pii?.submission_pdf_base64 === 'string' ? pii.submission_pdf_base64 : null,
+       certificate_pdf_base64: typeof pii?.certificate_pdf_base64 === 'string' ? pii.certificate_pdf_base64 : null,
+       created_at: transaction.createdAt.toISOString(),
+       updated_at: transaction.updatedAt.toISOString()
+@@ -210,8 +315,8 @@ export async function completeCacRequest(params: { transactionId: string; certif
+   });
+ }
+ 
+-/** Decrypts the sealed PII (proposed names + certificate) for the admin's manage page. Never call from a user-facing endpoint. */
++/** Decrypts the sealed PII (applicant details, submission PDF, certificate) for the admin's manage page. Never call from a user-facing endpoint. */
+ export function decryptCacPII(transaction: { metadata: unknown }) {
+   const metadata = transaction.metadata as Record<string, unknown> | null;
+-  return openPII<{ proposed_name_1?: string; proposed_name_2?: string | null; certificate_pdf_base64?: string }>(metadata?.pii);
++  return openPII<CacPII>(metadata?.pii);
+ }
+diff --git a/web/src/App.tsx b/web/src/App.tsx
+index c13e310..b849c30 100644
+--- a/web/src/App.tsx
++++ b/web/src/App.tsx
+@@ -24,6 +24,7 @@ import ValidationPage from './pages/verification/ValidationPage';
+ import PersonalizationPage from './pages/verification/PersonalizationPage';
+ import BvnRetrievalPage from './pages/verification/BvnRetrievalPage';
+ import DelinkPage from './pages/verification/DelinkPage';
++import BvnLicensePage from './pages/verification/BvnLicensePage';
+ import NinModificationPage from './pages/NinModificationPage';
+ import FundWalletPage from './pages/FundWalletPage';
+ import PaymentCallbackPage from './pages/PaymentCallbackPage';
+@@ -87,6 +88,7 @@ export default function App() {
+           <Route path="/modification" element={<ProtectedRoute><NinModificationPage /></ProtectedRoute>} />
+           <Route path="/tracking" element={<ProtectedRoute><PersonalizationPage /></ProtectedRoute>} />
+           <Route path="/delink" element={<ProtectedRoute><DelinkPage /></ProtectedRoute>} />
++          <Route path="/bvn-license" element={<ProtectedRoute><BvnLicensePage /></ProtectedRoute>} />
+           <Route path="/bvn-ret" element={<ProtectedRoute><BvnRetrievalPage /></ProtectedRoute>} />
+           <Route path="/terms" element={<PrivacyRedirect page="terms" />} />
+           <Route path="/fund-wallet" element={<ProtectedRoute><FundWalletPage /></ProtectedRoute>} />
+diff --git a/web/src/pages/verification/BvnLicensePage.tsx b/web/src/pages/verification/BvnLicensePage.tsx
+new file mode 100644
+index 0000000..4d2bf80
+--- /dev/null
++++ b/web/src/pages/verification/BvnLicensePage.tsx
+@@ -0,0 +1,268 @@
++import { useEffect, useState, type FormEvent } from 'react';
++import { Download, Loader2 } from 'lucide-react';
++import AppShell from '../../components/AppShell';
++import { api, ApiError } from '../../lib/api';
++import { PinConfirmDialog } from '../../components/PinConfirmDialog';
++import { PageHeader, FORM_SECTION_CLASSES, FORM_INPUT_CLASSES, FORM_LABEL_CLASSES, money } from '../../components/verification/shared';
++
++const ZONES = ['North Central', 'North East', 'North West', 'South East', 'South South', 'South West'] as const;
++const FLAT_PRICE = 10000; // Hardcoded server-side too (bvn-license-onboarding.service.ts) - not a ServicePricing row.
++
++type FormState = {
++  agent_location: string;
++  bvn: string;
++  nin: string;
++  first_name: string;
++  last_name: string;
++  middle_name: string;
++  phone_number: string;
++  date_of_birth: string;
++  email: string;
++  alternative_email: string;
++  account_number: string;
++  bank_name: string;
++  account_name: string;
++  address: string;
++  city: string;
++  lga: string;
++  state_of_residence: string;
++  geo_political_zone: (typeof ZONES)[number] | '';
++};
++
++const EMPTY: FormState = {
++  agent_location: '', bvn: '', nin: '', first_name: '', last_name: '', middle_name: '',
++  phone_number: '', date_of_birth: '', email: '', alternative_email: '', account_number: '',
++  bank_name: '', account_name: '', address: '', city: '', lga: '', state_of_residence: '', geo_political_zone: ''
++};
++
++type HistoryEntry = { reference: string; tracking_id: string | null; status: string; amount: number; pdf_base64: string | null; created_at: string };
++
++export default function BvnLicensePage() {
++  const [form, setForm] = useState<FormState>(EMPTY);
++  const [consent, setConsent] = useState(false);
++  const [showPin, setShowPin] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const [message, setMessage] = useState('');
++  const [result, setResult] = useState<{ reference: string; trackingId: string } | null>(null);
++
++  function field<K extends keyof FormState>(key: K, value: FormState[K]) {
++    setForm((prev) => ({ ...prev, [key]: value }));
++  }
++
++  function prepare(event: FormEvent) {
++    event.preventDefault();
++    setShowPin(true);
++  }
++
++  async function submit(pin: string) {
++    setShowPin(false);
++    setBusy(true);
++    setMessage('');
++    try {
++      const body = { ...form, alternative_email: form.alternative_email || undefined, consent: true, pin };
++      const res = await api.post<{ status: boolean; message?: string; data?: { reference: string; trackingId: string } }>('/verification/bvn/license-onboarding', body);
++      if (!res.status || !res.data) throw new Error(res.message);
++      setResult({ reference: res.data.reference, trackingId: res.data.trackingId });
++      setMessage('Enrollment request submitted. Your submission PDF is ready below.');
++      setForm(EMPTY);
++      setConsent(false);
++    } catch (error) {
++      setMessage(error instanceof ApiError ? error.message : error instanceof Error ? error.message : 'Request failed.');
++    } finally {
++      setBusy(false);
++    }
++  }
++
++  return (
++    <AppShell>
++      <div className="mx-auto max-w-3xl">
++        <PageHeader
++          title="BVN Agent Enrollment"
++          subtitle="Submit an agent's full BVN license enrollment details for manual processing. Zaka iya duba enrollment report da kanka daga tarihin da ke ƙasa."
++        />
++
++        <section className={FORM_SECTION_CLASSES}>
++          {!result ? (
++            <form onSubmit={prepare} className="space-y-4">
++              <div>
++                <h3 className="mb-3 font-display text-sm font-bold text-[#0b2f73]">Agent Details</h3>
++                <label className={FORM_LABEL_CLASSES}>
++                  Agent Location
++                  <input required placeholder="Where the agent operates" className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.agent_location} onChange={(e) => field('agent_location', e.target.value)} />
++                </label>
++              </div>
++
++              <div className="grid gap-4 border-t border-blue-100 pt-4 sm:grid-cols-2">
++                <label className={FORM_LABEL_CLASSES}>
++                  BVN
++                  <input required inputMode="numeric" maxLength={11} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.bvn} onChange={(e) => field('bvn', e.target.value)} />
++                </label>
++                <label className={FORM_LABEL_CLASSES}>
++                  NIN No
++                  <input required inputMode="numeric" maxLength={11} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.nin} onChange={(e) => field('nin', e.target.value)} />
++                </label>
++                <label className={FORM_LABEL_CLASSES}>
++                  First Name
++                  <input required className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.first_name} onChange={(e) => field('first_name', e.target.value)} />
++                </label>
++                <label className={FORM_LABEL_CLASSES}>
++                  Last Name
++                  <input required className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.last_name} onChange={(e) => field('last_name', e.target.value)} />
++                </label>
++                <label className={FORM_LABEL_CLASSES}>
++                  Middle Name <span className="font-normal text-[#0b2f73]/50">(optional)</span>
++                  <input className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.middle_name} onChange={(e) => field('middle_name', e.target.value)} />
++                </label>
++                <label className={FORM_LABEL_CLASSES}>
++                  Phone
++                  <input required inputMode="numeric" maxLength={11} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.phone_number} onChange={(e) => field('phone_number', e.target.value)} />
++                </label>
++                <label className={FORM_LABEL_CLASSES}>
++                  Date of Birth
++                  <input required type="date" className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.date_of_birth} onChange={(e) => field('date_of_birth', e.target.value)} />
++                </label>
++                <div />
++                <label className={FORM_LABEL_CLASSES}>
++                  Email
++                  <input required type="email" className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.email} onChange={(e) => field('email', e.target.value)} />
++                </label>
++                <label className={FORM_LABEL_CLASSES}>
++                  Alternative New Email <span className="font-normal text-[#0b2f73]/50">(optional)</span>
++                  <input type="email" className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.alternative_email} onChange={(e) => field('alternative_email', e.target.value)} />
++                </label>
++              </div>
++
++              <div className="grid gap-4 border-t border-blue-100 pt-4 sm:grid-cols-2">
++                <label className={FORM_LABEL_CLASSES}>
++                  Acct No
++                  <input required inputMode="numeric" minLength={10} maxLength={12} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.account_number} onChange={(e) => field('account_number', e.target.value)} />
++                </label>
++                <label className={FORM_LABEL_CLASSES}>
++                  Bank Name
++                  <input required className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.bank_name} onChange={(e) => field('bank_name', e.target.value)} />
++                </label>
++                <label className={`sm:col-span-2 ${FORM_LABEL_CLASSES}`}>
++                  Account Name
++                  <input required className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.account_name} onChange={(e) => field('account_name', e.target.value)} />
++                </label>
++              </div>
++
++              <div className="grid gap-4 border-t border-blue-100 pt-4 sm:grid-cols-2">
++                <label className={`sm:col-span-2 ${FORM_LABEL_CLASSES}`}>
++                  Address
++                  <input required className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.address} onChange={(e) => field('address', e.target.value)} />
++                </label>
++                <label className={FORM_LABEL_CLASSES}>
++                  City
++                  <input required className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.city} onChange={(e) => field('city', e.target.value)} />
++                </label>
++                <label className={FORM_LABEL_CLASSES}>
++                  LGA
++                  <input required className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.lga} onChange={(e) => field('lga', e.target.value)} />
++                </label>
++                <label className={FORM_LABEL_CLASSES}>
++                  State
++                  <input required className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.state_of_residence} onChange={(e) => field('state_of_residence', e.target.value)} />
++                </label>
++                <label className={FORM_LABEL_CLASSES}>
++                  Zone
++                  <select required className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.geo_political_zone} onChange={(e) => field('geo_political_zone', e.target.value as FormState['geo_political_zone'])}>
++                    <option value="">-- Select Zone --</option>
++                    {ZONES.map((z) => (
++                      <option key={z} value={z}>
++                        {z}
++                      </option>
++                    ))}
++                  </select>
++                </label>
++              </div>
++
++              <label className="flex items-start gap-2 border-t border-blue-100 pt-4 font-body text-xs text-[#0b2f73]/80">
++                <input type="checkbox" required checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 rounded border-blue-300 text-[#0b2f73] focus:ring-[#0b2f73]" />
++                I confirm the details above are accurate and the applicant has consented to this enrollment.
++              </label>
++
++              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
++                <span className="rounded-full bg-gold-500/15 px-4 py-2 text-center font-body text-sm font-bold text-gold-700">Service cost: {money(FLAT_PRICE)}</span>
++                <button disabled={busy || !consent} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b2f73] px-6 py-3 font-display font-semibold text-white disabled:opacity-60 sm:w-auto">
++                  {busy ? <Loader2 size={16} className="animate-spin" /> : 'Submit Enrollment'}
++                </button>
++              </div>
++              {message && <p className="rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>}
++            </form>
++          ) : (
++            <div>
++              <p className="rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>
++              <div className="mt-4 rounded-xl bg-blue-50 p-4 font-body text-sm text-[#0b2f73]">
++                <p>
++                  Reference: <span className="font-mono font-semibold">{result.reference}</span>
++                </p>
++                <p className="mt-1">
++                  Tracking ID: <span className="font-mono font-semibold">{result.trackingId}</span>
++                </p>
++              </div>
++              <button
++                onClick={() => {
++                  setResult(null);
++                  setMessage('');
++                }}
++                className="mt-4 w-full rounded-xl border border-blue-200 py-2.5 font-body text-sm text-[#0b2f73]"
++              >
++                Submit another
++              </button>
++            </div>
++          )}
++        </section>
++
++        <HistorySection />
++      </div>
++
++      <PinConfirmDialog open={showPin} onClose={() => setShowPin(false)} onVerified={submit} />
++    </AppShell>
++  );
++}
++
++function HistorySection() {
++  const [rows, setRows] = useState<HistoryEntry[] | null>(null);
++  const [loading, setLoading] = useState(true);
++
++  useEffect(() => {
++    api
++      .get<{ status: boolean; data: HistoryEntry[] }>('/verification/bvn/license-onboarding/history')
++      .then((r) => setRows(r.data ?? []))
++      .catch(() => setRows([]))
++      .finally(() => setLoading(false));
++  }, []);
++
++  return (
++    <section className={`${FORM_SECTION_CLASSES} mt-6`}>
++      <h3 className="font-display text-base font-bold text-[#0b2f73]">Recent enrollment requests</h3>
++      {loading ? (
++        <p className="mt-3 font-body text-sm text-[#0b2f73]/70">Loading…</p>
++      ) : !rows || rows.length === 0 ? (
++        <p className="mt-3 rounded-xl border border-dashed border-blue-200 px-4 py-4 text-center font-body text-sm text-[#0b2f73]/70">No enrollment requests in the last 30 days.</p>
++      ) : (
++        <div className="mt-3 divide-y divide-blue-100 overflow-hidden rounded-xl border border-blue-100 bg-blue-50">
++          {rows.map((row) => {
++            const base64 = row.pdf_base64?.replace(/^data:application\/pdf;base64,/i, '');
++            return (
++              <div key={row.reference} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
++                <div className="min-w-0">
++                  <p className="break-all font-mono text-xs font-semibold text-[#0b2f73]">{row.tracking_id ?? row.reference}</p>
++                  <p className="mt-1 font-body text-xs capitalize text-[#0b2f73]/70">
++                    {row.status} · {new Date(row.created_at).toLocaleDateString()} · {money(row.amount)}
++                  </p>
++                </div>
++                {base64 && (
++                  <a href={`data:application/pdf;base64,${base64}`} download={`${row.reference}.pdf`} className="flex shrink-0 items-center gap-2 rounded-lg bg-gold-500 px-3 py-2 font-body text-xs font-bold text-ink">
++                    <Download size={14} /> Submission PDF
++                  </a>
++                )}
++              </div>
++            );
++          })}
++        </div>
++      )}
++    </section>
++  );
++}
+diff --git a/web/src/pages/verification/CacServicesPage.tsx b/web/src/pages/verification/CacServicesPage.tsx
+index 6641626..7d69028 100644
+--- a/web/src/pages/verification/CacServicesPage.tsx
++++ b/web/src/pages/verification/CacServicesPage.tsx
+@@ -15,11 +15,29 @@ type CacHistoryEntry = {
+   proposed_name_2: string | null;
+   amount: number;
+   progress_notes: string | null;
++  submission_pdf_base64: string | null;
+   certificate_pdf_base64: string | null;
+   created_at: string;
+   updated_at: string;
+ };
+ 
++type Details = {
++  business_nature: string;
++  business_address: string;
++  proprietor_full_name: string;
++  proprietor_phone: string;
++  proprietor_email: string;
++  proprietor_residential_address: string;
++  proprietor_date_of_birth: string;
++  proprietor_gender: 'Male' | 'Female' | '';
++  proprietor_nin: string;
++};
++const EMPTY_DETAILS: Details = {
++  business_nature: '', business_address: '', proprietor_full_name: '', proprietor_phone: '',
++  proprietor_email: '', proprietor_residential_address: '', proprietor_date_of_birth: '',
++  proprietor_gender: '', proprietor_nin: ''
++};
++
+ const SERVICE_OPTIONS: { value: CacType; label: string }[] = [
+   { value: 'sole', label: 'Business Name Sole Proprietorship' },
+   { value: 'partnership', label: 'Business Name Partnership' },
+@@ -33,6 +51,7 @@ export default function CacServicesPage() {
+   const [service, setService] = useState<CacType | ''>('');
+   const [name1, setName1] = useState('');
+   const [name2, setName2] = useState('');
++  const [details, setDetails] = useState<Details>(EMPTY_DETAILS);
+   const [consent, setConsent] = useState(false);
+   const [showPin, setShowPin] = useState(false);
+   const [busy, setBusy] = useState(false);
+@@ -42,6 +61,10 @@ export default function CacServicesPage() {
+ 
+   const selectedPrice = useMemo(() => prices.find((p) => p.type === service)?.unitPrice, [prices, service]);
+ 
++  function detailField<K extends keyof Details>(key: K, value: Details[K]) {
++    setDetails((prev) => ({ ...prev, [key]: value }));
++  }
++
+   async function loadHistory() {
+     setLoadingHistory(true);
+     try {
+@@ -76,6 +99,7 @@ export default function CacServicesPage() {
+         cac_type: service,
+         proposed_name_1: name1,
+         proposed_name_2: name2 || undefined,
++        ...details,
+         pin
+       });
+       if (!result.status) throw new Error(result.message);
+@@ -83,6 +107,7 @@ export default function CacServicesPage() {
+       setService('');
+       setName1('');
+       setName2('');
++      setDetails(EMPTY_DETAILS);
+       setConsent(false);
+       void loadHistory();
+     } catch (error) {
+@@ -146,6 +171,56 @@ export default function CacServicesPage() {
+                   />
+                 </label>
+ 
++                <h3 className="mb-3 mt-5 border-t border-blue-100 pt-4 font-display text-sm font-bold text-[#0b2f73]">Business Details</h3>
++                <div className="grid gap-4 sm:grid-cols-2">
++                  <label className={`sm:col-span-2 ${FORM_LABEL_CLASSES}`}>
++                    Nature of Business
++                    <input required maxLength={300} placeholder="e.g. Retail of electronics" className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.business_nature} onChange={(e) => detailField('business_nature', e.target.value)} />
++                  </label>
++                  <label className={`sm:col-span-2 ${FORM_LABEL_CLASSES}`}>
++                    Business Address
++                    <input required maxLength={300} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.business_address} onChange={(e) => detailField('business_address', e.target.value)} />
++                  </label>
++                </div>
++
++                <h3 className="mb-3 mt-5 border-t border-blue-100 pt-4 font-display text-sm font-bold text-[#0b2f73]">
++                  {service === 'sole' ? 'Proprietor' : service === 'partnership' ? 'Lead Partner' : 'Applicant'} Details
++                </h3>
++                <div className="grid gap-4 sm:grid-cols-2">
++                  <label className={`sm:col-span-2 ${FORM_LABEL_CLASSES}`}>
++                    Full Name
++                    <input required maxLength={200} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.proprietor_full_name} onChange={(e) => detailField('proprietor_full_name', e.target.value)} />
++                  </label>
++                  <label className={FORM_LABEL_CLASSES}>
++                    Phone
++                    <input required inputMode="numeric" maxLength={11} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.proprietor_phone} onChange={(e) => detailField('proprietor_phone', e.target.value)} />
++                  </label>
++                  <label className={FORM_LABEL_CLASSES}>
++                    Email
++                    <input required type="email" className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.proprietor_email} onChange={(e) => detailField('proprietor_email', e.target.value)} />
++                  </label>
++                  <label className={`sm:col-span-2 ${FORM_LABEL_CLASSES}`}>
++                    Residential Address
++                    <input required maxLength={300} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.proprietor_residential_address} onChange={(e) => detailField('proprietor_residential_address', e.target.value)} />
++                  </label>
++                  <label className={FORM_LABEL_CLASSES}>
++                    Date of Birth
++                    <input required type="date" className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.proprietor_date_of_birth} onChange={(e) => detailField('proprietor_date_of_birth', e.target.value)} />
++                  </label>
++                  <label className={FORM_LABEL_CLASSES}>
++                    Gender
++                    <select required className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.proprietor_gender} onChange={(e) => detailField('proprietor_gender', e.target.value as Details['proprietor_gender'])}>
++                      <option value="">-- Select --</option>
++                      <option value="Male">Male</option>
++                      <option value="Female">Female</option>
++                    </select>
++                  </label>
++                  <label className={`sm:col-span-2 ${FORM_LABEL_CLASSES}`}>
++                    NIN
++                    <input required inputMode="numeric" maxLength={11} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.proprietor_nin} onChange={(e) => detailField('proprietor_nin', e.target.value)} />
++                  </label>
++                </div>
++
+                 <label className="mt-5 flex items-start gap-2 font-body text-xs text-[#0b2f73]/80">
+                   <input type="checkbox" required checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 rounded border-blue-300 text-[#0b2f73] focus:ring-[#0b2f73]" />
+                   I confirm these business name(s) and details are accurate, and I authorise this registration on my behalf.
+@@ -174,7 +249,7 @@ export default function CacServicesPage() {
+                 <table className="w-full text-left font-body text-xs">
+                   <thead>
+                     <tr className="border-b border-blue-100 text-[#0b2f73]/70">
+-                      {['Ref ID', 'Type', 'Proposed Nm 1', 'Proposed Nm 2', 'Amount', 'Status', 'Progress Notes', 'Date', ''].map((h) => (
++                      {['Ref ID', 'Type', 'Proposed Nm 1', 'Proposed Nm 2', 'Amount', 'Status', 'Progress Notes', 'Date', 'Form', 'Certificate'].map((h) => (
+                         <th key={h} className="whitespace-nowrap px-3 py-2 font-semibold">
+                           {h}
+                         </th>
+@@ -200,11 +275,24 @@ export default function CacServicesPage() {
+                         </td>
+                         <td className="max-w-[200px] px-3 py-2 text-[#0b2f73]/70">{row.progress_notes ?? '—'}</td>
+                         <td className="whitespace-nowrap px-3 py-2 text-[#0b2f73]/70">{new Date(row.created_at).toLocaleDateString()}</td>
++                        <td className="whitespace-nowrap px-3 py-2">
++                          {row.submission_pdf_base64 ? (
++                            <a
++                              href={`data:application/pdf;base64,${row.submission_pdf_base64}`}
++                              download={`${row.reference}-submission-form.pdf`}
++                              className="flex items-center gap-1 rounded-lg border border-[#0b2f73]/30 px-2 py-1.5 font-bold text-[#0b2f73]"
++                            >
++                              <Download size={12} /> Form
++                            </a>
++                          ) : (
++                            <span className="text-[#0b2f73]/40">—</span>
++                          )}
++                        </td>
+                         <td className="whitespace-nowrap px-3 py-2">
+                           {row.certificate_pdf_base64 ? (
+                             <a
+                               href={`data:application/pdf;base64,${row.certificate_pdf_base64}`}
+-                              download={`${row.reference}.pdf`}
++                              download={`${row.reference}-certificate.pdf`}
+                               className="flex items-center gap-1 rounded-lg bg-gold-500 px-2 py-1.5 font-bold text-ink"
+                             >
+                               <Download size={12} /> PDF
+-- 
+2.43.0
+

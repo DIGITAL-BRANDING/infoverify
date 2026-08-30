@@ -72,12 +72,23 @@ verificationRoutes.get('/prices', async (_req, res) => {
 
 verificationRoutes.post('/bvn/license-onboarding', async (req, res) => {
   const body = z.object({
-    agent_location: z.string().trim().min(2), agent_bvn: z.string().trim().length(11),
-    account_number: z.string().trim().min(10).max(12), bank_name: z.string().trim().min(2),
-    first_name: z.string().trim().min(1), last_name: z.string().trim().min(1),
-    email: z.string().trim().email(), phone_number: z.string().trim().length(11),
-    date_of_birth: z.string().trim().min(8), address: z.string().trim().min(3),
-    lga: z.string().trim().min(2), state_of_residence: z.string().trim().min(2),
+    agent_location: z.string().trim().min(2),
+    bvn: z.string().trim().length(11),
+    nin: z.string().trim().length(11),
+    first_name: z.string().trim().min(1),
+    last_name: z.string().trim().min(1),
+    middle_name: z.string().trim().max(100).optional(),
+    phone_number: z.string().trim().length(11),
+    date_of_birth: z.string().trim().min(8),
+    email: z.string().trim().email(),
+    alternative_email: z.string().trim().email().optional().or(z.literal('')),
+    account_number: z.string().trim().min(10).max(12),
+    bank_name: z.string().trim().min(2),
+    account_name: z.string().trim().min(2),
+    address: z.string().trim().min(3),
+    city: z.string().trim().min(2),
+    lga: z.string().trim().min(2),
+    state_of_residence: z.string().trim().min(2),
     geo_political_zone: z.enum(GEO_POLITICAL_ZONES), consent: z.literal(true), ...pinField
   }).parse(req.body);
   await requirePinConfirmation(req.user!.id, body.pin);
@@ -87,23 +98,32 @@ verificationRoutes.post('/bvn/license-onboarding', async (req, res) => {
 });
 
 verificationRoutes.get('/bvn/license-onboarding/history', async (req, res) => {
-  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  // A manual onboarding request may sit PENDING for days while an admin
+  // processes it - unlike GET /history above, this deliberately does NOT
+  // filter to status: SUCCESS only, so a customer can see (and download the
+  // submission PDF for) a request that's still in progress, not just
+  // completed ones. Same reasoning as listServiceTickets() in
+  // verification.service.ts, just for the BVN_LICENSE_ONBOARDING
+  // transaction type specifically, which that helper doesn't cover.
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const rows = await prisma.transaction.findMany({
     where: {
       userId: req.user!.id,
       type: TransactionType.BVN_LICENSE_ONBOARDING,
-      status: TransactionStatus.SUCCESS,
-      updatedAt: { gte: since }
+      createdAt: { gte: since }
     },
-    orderBy: { updatedAt: 'desc' }, take: 20
+    orderBy: { createdAt: 'desc' }, take: 20
   });
   res.json({ status: true, data: rows.map((tx) => {
     const metadata = tx.metadata as Record<string, unknown> | null;
-    return { reference: tx.reference, tracking_id: metadata?.tracking_id ?? null,
-      status: tx.status.toLowerCase(), amount: Number(tx.amountKobo) / 100,
-      // A manual onboarding request may sit pending for days. Its seven-day
-      // activity window starts only once an admin marks it successful.
-      created_at: tx.updatedAt.toISOString() };
+    return {
+      reference: tx.reference,
+      tracking_id: metadata?.tracking_id ?? null,
+      status: tx.status.toLowerCase(),
+      amount: Number(tx.amountKobo) / 100,
+      pdf_base64: typeof metadata?.pdf_base64 === 'string' ? metadata.pdf_base64 : null,
+      created_at: tx.createdAt.toISOString()
+    };
   }) });
 });
 
@@ -351,15 +371,26 @@ verificationRoutes.post('/cac', async (req, res) => {
       cac_type: z.enum(CAC_TYPES),
       proposed_name_1: z.string().trim().min(2).max(200),
       proposed_name_2: z.string().trim().max(200).optional(),
+      business_nature: z.string().trim().min(2).max(300),
+      business_address: z.string().trim().min(3).max(300),
+      proprietor_full_name: z.string().trim().min(2).max(200),
+      proprietor_phone: z.string().trim().length(11),
+      proprietor_email: z.string().trim().email(),
+      proprietor_residential_address: z.string().trim().min(3).max(300),
+      proprietor_date_of_birth: z.string().trim().min(8),
+      proprietor_gender: z.enum(['Male', 'Female']),
+      proprietor_nin: z.string().trim().length(11),
       ...pinField
     })
     .parse(req.body);
   await requirePinConfirmation(req.user!.id, body.pin);
+  const { pin: _pin, cac_type, proposed_name_1, proposed_name_2, ...details } = body;
   const result = await submitCacRequest({
     userId: req.user!.id,
-    type: body.cac_type as CacType,
-    proposedName1: body.proposed_name_1,
-    proposedName2: body.proposed_name_2,
+    type: cac_type as CacType,
+    proposedName1: proposed_name_1,
+    proposedName2: proposed_name_2,
+    details,
     idempotencyKey: idempotencyKeyFrom(req)
   });
   res.json({ status: true, data: { reference: result.reference, balance_after: result.balanceAfter } });

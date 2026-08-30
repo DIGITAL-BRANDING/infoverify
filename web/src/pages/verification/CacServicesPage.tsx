@@ -15,9 +15,27 @@ type CacHistoryEntry = {
   proposed_name_2: string | null;
   amount: number;
   progress_notes: string | null;
+  submission_pdf_base64: string | null;
   certificate_pdf_base64: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type Details = {
+  business_nature: string;
+  business_address: string;
+  proprietor_full_name: string;
+  proprietor_phone: string;
+  proprietor_email: string;
+  proprietor_residential_address: string;
+  proprietor_date_of_birth: string;
+  proprietor_gender: 'Male' | 'Female' | '';
+  proprietor_nin: string;
+};
+const EMPTY_DETAILS: Details = {
+  business_nature: '', business_address: '', proprietor_full_name: '', proprietor_phone: '',
+  proprietor_email: '', proprietor_residential_address: '', proprietor_date_of_birth: '',
+  proprietor_gender: '', proprietor_nin: ''
 };
 
 const SERVICE_OPTIONS: { value: CacType; label: string }[] = [
@@ -33,6 +51,7 @@ export default function CacServicesPage() {
   const [service, setService] = useState<CacType | ''>('');
   const [name1, setName1] = useState('');
   const [name2, setName2] = useState('');
+  const [details, setDetails] = useState<Details>(EMPTY_DETAILS);
   const [consent, setConsent] = useState(false);
   const [showPin, setShowPin] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -41,6 +60,10 @@ export default function CacServicesPage() {
   const [loadingHistory, setLoadingHistory] = useState(true);
 
   const selectedPrice = useMemo(() => prices.find((p) => p.type === service)?.unitPrice, [prices, service]);
+
+  function detailField<K extends keyof Details>(key: K, value: Details[K]) {
+    setDetails((prev) => ({ ...prev, [key]: value }));
+  }
 
   async function loadHistory() {
     setLoadingHistory(true);
@@ -76,6 +99,7 @@ export default function CacServicesPage() {
         cac_type: service,
         proposed_name_1: name1,
         proposed_name_2: name2 || undefined,
+        ...details,
         pin
       });
       if (!result.status) throw new Error(result.message);
@@ -83,6 +107,7 @@ export default function CacServicesPage() {
       setService('');
       setName1('');
       setName2('');
+      setDetails(EMPTY_DETAILS);
       setConsent(false);
       void loadHistory();
     } catch (error) {
@@ -146,6 +171,56 @@ export default function CacServicesPage() {
                   />
                 </label>
 
+                <h3 className="mb-3 mt-5 border-t border-blue-100 pt-4 font-display text-sm font-bold text-[#0b2f73]">Business Details</h3>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className={`sm:col-span-2 ${FORM_LABEL_CLASSES}`}>
+                    Nature of Business
+                    <input required maxLength={300} placeholder="e.g. Retail of electronics" className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.business_nature} onChange={(e) => detailField('business_nature', e.target.value)} />
+                  </label>
+                  <label className={`sm:col-span-2 ${FORM_LABEL_CLASSES}`}>
+                    Business Address
+                    <input required maxLength={300} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.business_address} onChange={(e) => detailField('business_address', e.target.value)} />
+                  </label>
+                </div>
+
+                <h3 className="mb-3 mt-5 border-t border-blue-100 pt-4 font-display text-sm font-bold text-[#0b2f73]">
+                  {service === 'sole' ? 'Proprietor' : service === 'partnership' ? 'Lead Partner' : 'Applicant'} Details
+                </h3>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className={`sm:col-span-2 ${FORM_LABEL_CLASSES}`}>
+                    Full Name
+                    <input required maxLength={200} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.proprietor_full_name} onChange={(e) => detailField('proprietor_full_name', e.target.value)} />
+                  </label>
+                  <label className={FORM_LABEL_CLASSES}>
+                    Phone
+                    <input required inputMode="numeric" maxLength={11} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.proprietor_phone} onChange={(e) => detailField('proprietor_phone', e.target.value)} />
+                  </label>
+                  <label className={FORM_LABEL_CLASSES}>
+                    Email
+                    <input required type="email" className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.proprietor_email} onChange={(e) => detailField('proprietor_email', e.target.value)} />
+                  </label>
+                  <label className={`sm:col-span-2 ${FORM_LABEL_CLASSES}`}>
+                    Residential Address
+                    <input required maxLength={300} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.proprietor_residential_address} onChange={(e) => detailField('proprietor_residential_address', e.target.value)} />
+                  </label>
+                  <label className={FORM_LABEL_CLASSES}>
+                    Date of Birth
+                    <input required type="date" className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.proprietor_date_of_birth} onChange={(e) => detailField('proprietor_date_of_birth', e.target.value)} />
+                  </label>
+                  <label className={FORM_LABEL_CLASSES}>
+                    Gender
+                    <select required className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.proprietor_gender} onChange={(e) => detailField('proprietor_gender', e.target.value as Details['proprietor_gender'])}>
+                      <option value="">-- Select --</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                    </select>
+                  </label>
+                  <label className={`sm:col-span-2 ${FORM_LABEL_CLASSES}`}>
+                    NIN
+                    <input required inputMode="numeric" maxLength={11} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.proprietor_nin} onChange={(e) => detailField('proprietor_nin', e.target.value)} />
+                  </label>
+                </div>
+
                 <label className="mt-5 flex items-start gap-2 font-body text-xs text-[#0b2f73]/80">
                   <input type="checkbox" required checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 rounded border-blue-300 text-[#0b2f73] focus:ring-[#0b2f73]" />
                   I confirm these business name(s) and details are accurate, and I authorise this registration on my behalf.
@@ -174,7 +249,7 @@ export default function CacServicesPage() {
                 <table className="w-full text-left font-body text-xs">
                   <thead>
                     <tr className="border-b border-blue-100 text-[#0b2f73]/70">
-                      {['Ref ID', 'Type', 'Proposed Nm 1', 'Proposed Nm 2', 'Amount', 'Status', 'Progress Notes', 'Date', ''].map((h) => (
+                      {['Ref ID', 'Type', 'Proposed Nm 1', 'Proposed Nm 2', 'Amount', 'Status', 'Progress Notes', 'Date', 'Form', 'Certificate'].map((h) => (
                         <th key={h} className="whitespace-nowrap px-3 py-2 font-semibold">
                           {h}
                         </th>
@@ -201,10 +276,23 @@ export default function CacServicesPage() {
                         <td className="max-w-[200px] px-3 py-2 text-[#0b2f73]/70">{row.progress_notes ?? '—'}</td>
                         <td className="whitespace-nowrap px-3 py-2 text-[#0b2f73]/70">{new Date(row.created_at).toLocaleDateString()}</td>
                         <td className="whitespace-nowrap px-3 py-2">
+                          {row.submission_pdf_base64 ? (
+                            <a
+                              href={`data:application/pdf;base64,${row.submission_pdf_base64}`}
+                              download={`${row.reference}-submission-form.pdf`}
+                              className="flex items-center gap-1 rounded-lg border border-[#0b2f73]/30 px-2 py-1.5 font-bold text-[#0b2f73]"
+                            >
+                              <Download size={12} /> Form
+                            </a>
+                          ) : (
+                            <span className="text-[#0b2f73]/40">—</span>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2">
                           {row.certificate_pdf_base64 ? (
                             <a
                               href={`data:application/pdf;base64,${row.certificate_pdf_base64}`}
-                              download={`${row.reference}.pdf`}
+                              download={`${row.reference}-certificate.pdf`}
                               className="flex items-center gap-1 rounded-lg bg-gold-500 px-2 py-1.5 font-bold text-ink"
                             >
                               <Download size={12} /> PDF

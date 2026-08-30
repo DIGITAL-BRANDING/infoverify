@@ -24,6 +24,7 @@ import ValidationPage from './pages/verification/ValidationPage';
 import PersonalizationPage from './pages/verification/PersonalizationPage';
 import BvnRetrievalPage from './pages/verification/BvnRetrievalPage';
 import DelinkPage from './pages/verification/DelinkPage';
+import BvnLicensePage from './pages/verification/BvnLicensePage';
 import NinModificationPage from './pages/NinModificationPage';
 import FundWalletPage from './pages/FundWalletPage';
 import PaymentCallbackPage from './pages/PaymentCallbackPage';
@@ -87,6 +88,7 @@ export default function App() {
           <Route path="/modification" element={<ProtectedRoute><NinModificationPage /></ProtectedRoute>} />
           <Route path="/tracking" element={<ProtectedRoute><PersonalizationPage /></ProtectedRoute>} />
           <Route path="/delink" element={<ProtectedRoute><DelinkPage /></ProtectedRoute>} />
+          <Route path="/bvn-license" element={<ProtectedRoute><BvnLicensePage /></ProtectedRoute>} />
           <Route path="/bvn-ret" element={<ProtectedRoute><BvnRetrievalPage /></ProtectedRoute>} />
           <Route path="/terms" element={<PrivacyRedirect page="terms" />} />
           <Route path="/fund-wallet" element={<ProtectedRoute><FundWalletPage /></ProtectedRoute>} />

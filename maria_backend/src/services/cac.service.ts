@@ -1,3 +1,4 @@
+import PDFDocument from 'pdfkit';
 import { Prisma, TransactionStatus, TransactionType } from '@prisma/client';
 import { koboToNaira } from '../lib/money.js';
 import { sealPII, openPII, mergeSealedPII } from '../lib/pii.js';
@@ -12,14 +13,18 @@ import { debitWallet } from './wallet.service.js';
  * which go through Techhub). It follows the exact same manual pattern as NIN
  * Modification (see nin-modification.service.ts) and BVN License Onboarding:
  * the customer is debited at submission, the transaction sits PENDING, and an
- * admin does the actual CAC filing by hand. Two things an admin can do from
- * the Transaction page while it's PENDING (see admin/cac.ts):
+ * admin does the actual CAC filing by hand. Three things an admin can do from
+ * the "manage" page (see admin/cac.ts):
+ *   - Download the auto-generated submission PDF (every field the customer
+ *     supplied) - this is what they'd actually take to the CAC portal to
+ *     register the business, same idea as BVN License Onboarding's
+ *     submission PDF.
  *   - Save progress notes, visible to the customer on their history table
  *     (matches the reference design's "Progress Notes" column).
- *   - Mark it complete and attach the final certificate PDF, which the
- *     customer can then download - this is the one difference from NIN
- *     Modification, where the "PDF" is just a record of the submission, not
- *     a genuine end-of-process CAC document.
+ *   - Mark it complete and attach the FINAL certificate PDF (the one CAC
+ *     issues once registration is done), which the customer can then
+ *     download - this is a second, separate PDF from the submission one
+ *     above.
  *
  * "Company more than 1M, NGO, Clubs, Association, Etc." has no fixed price
  * in the reference design ("quote on request") and isn't included in
@@ -33,6 +38,25 @@ const CAC_CONFIG: Record<CacType, { title: string; price: number }> = {
   sole: { title: 'Business Name — Sole Proprietorship', price: 28000 },
   partnership: { title: 'Business Name — Partnership', price: 32000 },
   llc: { title: 'Limited Liability — 1M Share', price: 40000 }
+};
+
+/**
+ * The applicant/proprietor details actually needed to file with CAC - a
+ * business name/company alone isn't enough to register anything. Kept as a
+ * flat, mostly-generic dict (like BvnLicenseInput in
+ * bvn-license-onboarding.service.ts) so the submission PDF can just loop
+ * over every field without a hand-maintained render function per field.
+ */
+export type CacApplicantDetails = {
+  business_nature: string;
+  business_address: string;
+  proprietor_full_name: string;
+  proprietor_phone: string;
+  proprietor_email: string;
+  proprietor_residential_address: string;
+  proprietor_date_of_birth: string;
+  proprietor_gender: 'Male' | 'Female';
+  proprietor_nin: string;
 };
 
 function serviceKeyFor(type: CacType) {
@@ -90,6 +114,62 @@ export async function listCacPrices() {
   }));
 }
 
+function createCacReference() {
+  return `CAC-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+}
+
+/** Renders every submitted field into a simple PDF the admin can print or
+ *  upload straight into the CAC portal's forms - same pattern as
+ *  bvn-license-onboarding.service.ts's renderPdf. */
+async function renderSubmissionPdf(params: {
+  cacType: CacType;
+  proposedName1: string;
+  proposedName2?: string | null;
+  details: CacApplicantDetails;
+  trackingRef: string;
+}) {
+  const doc = new PDFDocument({ size: 'A4', margin: 48 });
+  const chunks: Buffer[] = [];
+  doc.on('data', (c: Buffer) => chunks.push(c));
+  const done = new Promise<string>((resolve, reject) => {
+    doc.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
+    doc.on('error', reject);
+  });
+
+  doc.fontSize(18).fillColor('#0b2f73').text('CAC Business Registration — Submission Form', { align: 'center' });
+  doc.moveDown();
+  doc.fontSize(10).fillColor('#374151').text(`Reference: ${params.trackingRef}`);
+  doc.text(`Submitted: ${new Date().toISOString()}`);
+  doc.text(`Registration type: ${CAC_CONFIG[params.cacType].title}`);
+  doc.moveDown();
+
+  doc.fontSize(13).fillColor('#0b2f73').text('Proposed Business Name(s)');
+  doc.fontSize(10).fillColor('#374151').text(`Option 1: ${params.proposedName1}`);
+  if (params.proposedName2) doc.text(`Option 2: ${params.proposedName2}`);
+  doc.moveDown();
+
+  doc.fontSize(13).fillColor('#0b2f73').text('Business Details');
+  doc.fontSize(10).fillColor('#374151');
+  doc.text(`Nature of business: ${params.details.business_nature}`);
+  doc.text(`Business address: ${params.details.business_address}`);
+  doc.moveDown();
+
+  doc.fontSize(13).fillColor('#0b2f73').text('Proprietor / Applicant Details');
+  doc.fontSize(10).fillColor('#374151');
+  doc.text(`Full name: ${params.details.proprietor_full_name}`);
+  doc.text(`Phone: ${params.details.proprietor_phone}`);
+  doc.text(`Email: ${params.details.proprietor_email}`);
+  doc.text(`Residential address: ${params.details.proprietor_residential_address}`);
+  doc.text(`Date of birth: ${params.details.proprietor_date_of_birth}`);
+  doc.text(`Gender: ${params.details.proprietor_gender}`);
+  doc.text(`NIN: ${params.details.proprietor_nin}`);
+
+  doc.moveDown(2);
+  doc.fontSize(9).fillColor('#6b7280').text('Generated automatically at submission time for manual CAC filing. Not a CAC certificate.');
+  doc.end();
+  return done;
+}
+
 export type SubmitCacResult = { reference: string; balanceAfter: number };
 
 export async function submitCacRequest(params: {
@@ -97,11 +177,21 @@ export async function submitCacRequest(params: {
   type: CacType;
   proposedName1: string;
   proposedName2?: string;
+  details: CacApplicantDetails;
   idempotencyKey?: string;
 }): Promise<SubmitCacResult> {
   const config = CAC_CONFIG[params.type];
   const price = await getCacPrice(params.type);
   const service = serviceKeyFor(params.type);
+  const trackingRef = createCacReference();
+
+  const submissionPdfBase64 = await renderSubmissionPdf({
+    cacType: params.type,
+    proposedName1: params.proposedName1,
+    proposedName2: params.proposedName2,
+    details: params.details,
+    trackingRef
+  });
 
   const debit = await debitWallet({
     userId: params.userId,
@@ -113,7 +203,13 @@ export async function submitCacRequest(params: {
       cac_type: params.type,
       unit_price: price.unitPrice,
       progress_notes: null,
-      pii: sealPII({ proposed_name_1: params.proposedName1, proposed_name_2: params.proposedName2 ?? null })
+      tracking_ref: trackingRef,
+      pii: sealPII({
+        proposed_name_1: params.proposedName1,
+        proposed_name_2: params.proposedName2 ?? null,
+        ...params.details,
+        submission_pdf_base64: submissionPdfBase64
+      })
     } as Prisma.InputJsonValue,
     idempotencyKey: params.idempotencyKey,
     // No provider was actually paid yet - an admin pays CAC's fee when they
@@ -132,9 +228,17 @@ export type CacHistoryEntry = {
   proposed_name_2: string | null;
   amount: number;
   progress_notes: string | null;
+  submission_pdf_base64: string | null;
   certificate_pdf_base64: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type CacPII = Partial<CacApplicantDetails> & {
+  proposed_name_1?: string;
+  proposed_name_2?: string | null;
+  submission_pdf_base64?: string;
+  certificate_pdf_base64?: string;
 };
 
 /**
@@ -153,7 +257,7 @@ export async function listCacHistory(userId: string) {
 
   return transactions.map((transaction): CacHistoryEntry => {
     const metadata = transaction.metadata as Record<string, unknown> | null;
-    const pii = openPII<{ proposed_name_1?: string; proposed_name_2?: string | null; certificate_pdf_base64?: string }>(metadata?.pii);
+    const pii = openPII<CacPII>(metadata?.pii);
     return {
       reference: transaction.reference,
       status: transaction.status.toLowerCase(),
@@ -162,6 +266,7 @@ export async function listCacHistory(userId: string) {
       proposed_name_2: pii?.proposed_name_2 ?? null,
       amount: koboToNaira(transaction.amountKobo),
       progress_notes: typeof metadata?.progress_notes === 'string' ? metadata.progress_notes : null,
+      submission_pdf_base64: typeof pii?.submission_pdf_base64 === 'string' ? pii.submission_pdf_base64 : null,
       certificate_pdf_base64: typeof pii?.certificate_pdf_base64 === 'string' ? pii.certificate_pdf_base64 : null,
       created_at: transaction.createdAt.toISOString(),
       updated_at: transaction.updatedAt.toISOString()
@@ -210,8 +315,8 @@ export async function completeCacRequest(params: { transactionId: string; certif
   });
 }
 
-/** Decrypts the sealed PII (proposed names + certificate) for the admin's manage page. Never call from a user-facing endpoint. */
+/** Decrypts the sealed PII (applicant details, submission PDF, certificate) for the admin's manage page. Never call from a user-facing endpoint. */
 export function decryptCacPII(transaction: { metadata: unknown }) {
   const metadata = transaction.metadata as Record<string, unknown> | null;
-  return openPII<{ proposed_name_1?: string; proposed_name_2?: string | null; certificate_pdf_base64?: string }>(metadata?.pii);
+  return openPII<CacPII>(metadata?.pii);
 }
