@@ -71,6 +71,12 @@ enum TransactionType {
   /// uploads the completed certificate PDF, which marks the transaction
   /// SUCCESS. See cac.service.ts.
   CAC_SERVICE_REQUEST
+  /// A submitted BVN Modification request (update name/phone/DOB/address/
+  /// email tied to a BVN). No provider API for this either - same manual
+  /// pattern as NIN_MODIFICATION: debit now, admin re-keys the change by
+  /// hand wherever BVN modifications are actually filed, then marks it
+  /// complete. See bvn-modification.service.ts.
+  BVN_MODIFICATION
   /// The credit-back entry refundWallet() creates - distinct from the
   /// original debit's own type (e.g. a reversed DATA_PURCHASE gets a REFUND
   /// entry, not a second DATA_PURCHASE). See relatedTransactionId above.

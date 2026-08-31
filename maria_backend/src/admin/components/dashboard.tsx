@@ -39,6 +39,12 @@ const quickLinks: QuickLink[] = [
     icon: 'Edit'
   },
   {
+    label: 'BVN Modification Requests',
+    description: 'Manual BVN correction requests awaiting processing by an agent',
+    href: `${ADMIN_ROOT_PATH}/resources/Transaction?filters.type=BVN_MODIFICATION`,
+    icon: 'Edit3'
+  },
+  {
     label: 'User Wallet Activity',
     description: 'Look up any customer: funding, spend & recent transactions',
     href: `${ADMIN_ROOT_PATH}/user-wallet`,

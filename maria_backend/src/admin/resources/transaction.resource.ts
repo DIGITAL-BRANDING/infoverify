@@ -3,6 +3,7 @@ import type { ResourceWithOptions } from 'adminjs';
 import { prisma } from '../../lib/prisma.js';
 import { decryptTransactionPII } from '../../services/verification.service.js';
 import { completeModification } from '../../services/nin-modification.service.js';
+import { completeBvnModification } from '../../services/bvn-modification.service.js';
 import { TransactionStatus } from '@prisma/client';
 import { refundWallet } from '../../services/wallet.service.js';
 import { logAdminAction } from '../audit.js';
@@ -65,7 +66,7 @@ export const transactionResource: ResourceWithOptions = {
           // other transaction type, where PENDING means "still in flight,
           // don't touch it", so this is the one type reverse() also allows
           // from PENDING.
-          if (status === 'PENDING') return ['NIN_MODIFICATION', 'BVN_LICENSE_ONBOARDING', 'CAC_SERVICE_REQUEST'].includes(record?.params?.type as string);
+          if (status === 'PENDING') return ['NIN_MODIFICATION', 'BVN_LICENSE_ONBOARDING', 'CAC_SERVICE_REQUEST', 'BVN_MODIFICATION'].includes(record?.params?.type as string);
           return status === 'SUCCESS' || status === 'FAILED';
         },
         handler: async (request, response, context) => {
@@ -213,6 +214,69 @@ export const transactionResource: ResourceWithOptions = {
           return {
             record: record.toJSON(currentAdmin),
             redirectUrl: `/admin/nin-modification/${record.params.id as string}/pdf`
+          };
+        }
+      },
+      // Same two actions as completeModification/downloadModificationPdf
+      // above, for BVN_MODIFICATION rows instead of NIN_MODIFICATION - see
+      // bvn-modification.service.ts.
+      completeBvnModification: {
+        actionType: 'record',
+        icon: 'CheckCircle',
+        guard: 'Mark this BVN Modification request as completed? Only do this after the change has actually gone through.',
+        isAccessible: ({ currentAdmin, record }) => {
+          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
+          if (!admin || admin.role === 'SUPPORT') return false;
+          return record?.params?.type === 'BVN_MODIFICATION' && record?.params?.status === 'PENDING';
+        },
+        handler: async (request, response, context) => {
+          const { record, currentAdmin } = context;
+          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
+          if (!record || !admin) {
+            throw new Error('Missing record or admin context');
+          }
+
+          try {
+            await completeBvnModification({ transactionId: record.params.id as string });
+
+            await logAdminAction({
+              adminId: admin.id,
+              action: 'COMPLETE_BVN_MODIFICATION',
+              targetType: 'Transaction',
+              targetId: record.params.id as string,
+              metadata: { reference: record.params.reference }
+            });
+
+            return {
+              record: record.toJSON(currentAdmin),
+              notice: { message: 'Marked as completed.', type: 'success' }
+            };
+          } catch (error) {
+            return {
+              record: record.toJSON(currentAdmin),
+              notice: {
+                message: error instanceof Error ? error.message : 'Could not mark this as completed',
+                type: 'error'
+              }
+            };
+          }
+        }
+      },
+      downloadBvnModificationPdf: {
+        actionType: 'record',
+        icon: 'Download',
+        isAccessible: ({ currentAdmin, record }) => {
+          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
+          return admin?.role === 'SUPER_ADMIN' && record?.params?.type === 'BVN_MODIFICATION';
+        },
+        handler: async (request, response, context) => {
+          const { record, currentAdmin } = context;
+          if (!record) {
+            throw new Error('Missing record');
+          }
+          return {
+            record: record.toJSON(currentAdmin),
+            redirectUrl: `/admin/bvn-modification/${record.params.id as string}/pdf`
           };
         }
       },

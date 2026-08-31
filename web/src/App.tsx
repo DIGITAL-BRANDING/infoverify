@@ -27,6 +27,7 @@ import DelinkPage from './pages/verification/DelinkPage';
 import BvnLicensePage from './pages/verification/BvnLicensePage';
 import DemographicVerificationPage from './pages/verification/DemographicVerificationPage';
 import NinModificationPage from './pages/NinModificationPage';
+import BvnModificationPage from './pages/BvnModificationPage';
 import FundWalletPage from './pages/FundWalletPage';
 import PaymentCallbackPage from './pages/PaymentCallbackPage';
 import DeliveriesPage from './pages/DeliveriesPage';
@@ -86,6 +87,7 @@ export default function App() {
           <Route path="/ipe" element={<ProtectedRoute><IpeClearancePage /></ProtectedRoute>} />
           <Route path="/validation" element={<ProtectedRoute><ValidationPage /></ProtectedRoute>} />
           <Route path="/nin-modification" element={<ProtectedRoute><NinModificationPage /></ProtectedRoute>} />
+          <Route path="/bvn-modification" element={<ProtectedRoute><BvnModificationPage /></ProtectedRoute>} />
           <Route path="/modification" element={<ProtectedRoute><NinModificationPage /></ProtectedRoute>} />
           <Route path="/tracking" element={<ProtectedRoute><PersonalizationPage /></ProtectedRoute>} />
           <Route path="/delink" element={<ProtectedRoute><DelinkPage /></ProtectedRoute>} />

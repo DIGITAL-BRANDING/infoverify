@@ -24,7 +24,20 @@ function NotificationBell() {
   useEffect(() => { load(); const timer = window.setInterval(load, 30000); return () => window.clearInterval(timer); }, []);
   const unread = items.filter(n => !n.is_read).length;
   async function toggle() { setOpen(v => !v); if (unread) { const ids = items.filter(n => !n.is_read).map(n => n.id); setItems(v => v.map(n => ({...n, is_read: true}))); await api.post('/notifications/read', {ids}).catch(() => {}); } }
-  return <div className="relative"><button onClick={toggle} aria-label="Open notifications" className="relative rounded-xl border border-parchment-line bg-parchment p-2 text-gold-700 hover:bg-gold-50"><Bell size={19}/>{unread > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-ember-500 px-1 text-center text-[10px] font-bold text-white">{unread > 9 ? '9+' : unread}</span>}</button>{open && <section className="absolute right-0 top-12 z-50 w-[min(360px,calc(100vw-32px))] overflow-hidden rounded-2xl border border-parchment-line bg-white shadow-2xl"><header className="flex items-center justify-between border-b border-parchment-line px-4 py-3"><b className="text-sm text-ink">Recent notifications</b><button onClick={() => setOpen(false)} aria-label="Close notifications"><X size={17}/></button></header><div className="max-h-96 overflow-y-auto">{items.length ? items.map(n => <article key={n.id} className="border-b border-slate-100 px-4 py-3 last:border-0"><p className="text-sm font-bold text-ink">{n.title}</p><p className="mt-1 text-xs leading-5 text-ink-600">{n.body}</p><time className="mt-2 block text-[10px] text-slate-400">{new Date(n.created_at).toLocaleString()}</time></article>) : <p className="p-5 text-center text-sm text-ink-600">No notifications yet.</p>}</div></section>}</div>;
+  // Positioning note: the panel below is `fixed` to the viewport (not
+  // `absolute` relative to this button's own tiny wrapper div) deliberately
+  // - the bell sits inside the header's flex row next to other icons/text
+  // ("Secure services"), so an `absolute right-0` here aligns to the edge
+  // of the bell's own cramped wrapper rather than the actual screen edge,
+  // leaving the panel shifted left with dashboard tiles visible peeking out
+  // from behind its right edge on mobile. `fixed` + explicit
+  // viewport-relative offsets sidesteps that entirely, and the backdrop
+  // gives it a proper mobile sheet feel (tap outside to close) instead of
+  // floating awkwardly over other content.
+  return <div className="relative"><button onClick={toggle} aria-label="Open notifications" className="relative rounded-xl border border-parchment-line bg-parchment p-2 text-gold-700 hover:bg-gold-50"><Bell size={19}/>{unread > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-ember-500 px-1 text-center text-[10px] font-bold text-white">{unread > 9 ? '9+' : unread}</span>}</button>{open && <>
+    <button aria-label="Close notifications backdrop" onClick={() => setOpen(false)} className="fixed inset-0 z-40 bg-slate-950/30" />
+    <section className="fixed right-3 top-16 z-50 mt-2 flex max-h-[calc(100vh-100px)] w-[min(360px,calc(100vw-24px))] flex-col overflow-hidden rounded-2xl border border-parchment-line bg-white shadow-2xl"><header className="flex shrink-0 items-center justify-between border-b border-parchment-line px-4 py-3"><b className="text-sm text-ink">Recent notifications</b><button onClick={() => setOpen(false)} aria-label="Close notifications"><X size={17}/></button></header><div className="overflow-y-auto">{items.length ? items.map(n => <article key={n.id} className="border-b border-slate-100 px-4 py-3 last:border-0"><p className="text-sm font-bold text-ink">{n.title}</p><p className="mt-1 text-xs leading-5 text-ink-600">{n.body}</p><time className="mt-2 block text-[10px] text-slate-400">{new Date(n.created_at).toLocaleString()}</time></article>) : <p className="p-5 text-center text-sm text-ink-600">No notifications yet.</p>}</div></section>
+  </>}</div>;
 }
 
 export default function AppShell({ children }: { children: ReactNode }) {
