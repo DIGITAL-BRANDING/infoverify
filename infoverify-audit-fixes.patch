@@ -1,0 +1,75 @@
+From ba0c2f899beceb598e8d7ff1c7e0ff03572fcabf Mon Sep 17 00:00:00 2001
+From: Claude <dev@infoverify.local>
+Date: Mon, 31 Aug 2026 22:03:41 +0000
+Subject: [PATCH] Fix implemented/route mismatches in service catalog; add
+ missing sidebar routes
+
+---
+ web/src/lib/services.ts | 35 +++++++++++++++++++++++++++++------
+ 1 file changed, 29 insertions(+), 6 deletions(-)
+
+diff --git a/web/src/lib/services.ts b/web/src/lib/services.ts
+index 6ef702d..3002cb1 100644
+--- a/web/src/lib/services.ts
++++ b/web/src/lib/services.ts
+@@ -15,6 +15,8 @@ import {
+   ShieldCheck,
+   Receipt,
+   Search,
++  History,
++  WalletCards,
+   type LucideIcon,
+ } from 'lucide-react';
+ 
+@@ -42,7 +44,7 @@ export type ServiceItem = {
+ // website sees one consistent menu.
+ export const SERVICES: ServiceItem[] = [
+   { label: 'NIN_Phone Verification', description: 'Verify NIN and phone details.', icon: IdCard, route: '/nin', tint: 'gold', implemented: true },
+-  { label: 'Phone Multiple', description: 'Check multiple phone numbers.', icon: Smartphone, route: '/phone', tint: 'bronze', implemented: false },
++  { label: 'Phone Multiple', description: 'Check multiple phone numbers.', icon: Smartphone, route: '/phone', tint: 'bronze', implemented: true },
+   { label: 'CAC Services', description: 'Business registration and lookup.', icon: Briefcase, route: '/cac', tint: 'success', implemented: true },
+   { label: 'BVN Verification', description: 'Verify bank identity details.', icon: Fingerprint, route: '/bvn', tint: 'ember', implemented: true },
+   { label: 'IPE Clerance (Instant)', description: 'Instant identity clearance.', icon: ShieldCheck, route: '/ipe', tint: 'gold', implemented: true },
+@@ -51,13 +53,34 @@ export const SERVICES: ServiceItem[] = [
+   { label: 'BVN Retrieval', description: 'Retrieve BVN details.', icon: Fingerprint, route: '/bvn-ret', tint: 'ember', implemented: true },
+   { label: 'Self Service Unlink', description: 'Unlink identity services yourself.', icon: ShieldCheck, route: '/delink', tint: 'gold', implemented: true },
+   { label: 'NIN Modifications', description: 'Request NIN modifications.', icon: IdCard, route: '/modification', tint: 'bronze', implemented: true },
+-  { label: 'Birth Attestation', description: 'Birth attestation services.', icon: Receipt, route: '/attestation', tint: 'success', implemented: true },
+-  { label: 'TIN Certificate', description: 'Get your TIN certificate.', icon: Receipt, route: '/tin', tint: 'ember', implemented: true },
+-  { label: 'Newspaper Publication', description: 'Publish notices in newspapers.', icon: MessageSquare, route: '/newspaper', tint: 'gold', implemented: true },
++  // These three have no dedicated page or route anywhere in App.tsx yet
++  // (confirmed by cross-checking every SERVICES route against App.tsx's
++  // <Route> paths) - `implemented: true` here was silently sending anyone
++  // who clicked them to App.tsx's catch-all `*` route, which redirects to
++  // "/" with no explanation. `false` correctly routes them through the
++  // SERVICES.filter(!implemented) loop below to the friendly
++  // "coming soon" page instead.
++  { label: 'Birth Attestation', description: 'Birth attestation services.', icon: Receipt, route: '/attestation', tint: 'success', implemented: false },
++  { label: 'TIN Certificate', description: 'Get your TIN certificate.', icon: Receipt, route: '/tin', tint: 'ember', implemented: false },
++  { label: 'Newspaper Publication', description: 'Publish notices in newspapers.', icon: MessageSquare, route: '/newspaper', tint: 'gold', implemented: false },
+   { label: 'Demographic Search', description: 'Search demographic records.', icon: Search, route: '/demo', tint: 'bronze', implemented: true },
+-  { label: 'BVN License Creation', description: 'Create and onboard a BVN license.', icon: Fingerprint, route: '/bvn-license', tint: 'gold', implemented: false },
+-  { label: 'BVN Modification', description: 'Request a BVN record modification.', icon: Fingerprint, route: '/bvn-modification', tint: 'bronze', implemented: false },
++  // These two now have real dedicated pages + <Route> entries in App.tsx
++  // (BvnLicensePage, BvnModificationPage). Leaving `implemented: false`
++  // here made App.tsx's SERVICES.filter(!implemented) loop register a
++  // SECOND, conflicting <Route> at the same path pointing at
++  // ComingSoonPage instead - two <Route> elements sharing one path is
++  // fragile (whichever wins depends on react-router's internal tie-break,
++  // not anything declared explicitly here). `true` removes them from that
++  // loop so only the real page's route exists.
++  { label: 'BVN License Creation', description: 'Create and onboard a BVN license.', icon: Fingerprint, route: '/bvn-license', tint: 'gold', implemented: true },
++  { label: 'BVN Modification', description: 'Request a BVN record modification.', icon: Fingerprint, route: '/bvn-modification', tint: 'bronze', implemented: true },
+   { label: 'BVN CRM', description: 'Manage BVN customer records.', icon: Fingerprint, route: '/bvn-crm', tint: 'gold', implemented: false },
++  // Sidebar-only links (components/AppShell.tsx) that had no SERVICES entry
++  // and therefore no route at all anywhere - not even a "coming soon"
++  // fallback, since that's generated from this array. Clicking either one
++  // silently redirected to "/" with zero explanation.
++  { label: 'Slips History', description: 'Review your past verification slips.', icon: History, route: '/verifications', tint: 'bronze', implemented: false },
++  { label: 'Wallet Summary', description: 'See a summary of your wallet activity.', icon: WalletCards, route: '/history', tint: 'success', implemented: false },
+   {
+     label: 'Buy Data',
+     description: 'Get data bundles for MTN, Glo, Airtel or 9mobile, delivered instantly.',
+-- 
+2.43.0
+

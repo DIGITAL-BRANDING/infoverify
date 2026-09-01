@@ -45,6 +45,17 @@ export type FakeTransaction = {
   [key: string]: unknown;
 };
 
+export type FakeServicePricing = {
+  id: string;
+  service: string;
+  provider: string;
+  label: string;
+  providerCostKobo: bigint;
+  sellingPriceKobo: bigint | null;
+  isActive: boolean;
+  [key: string]: unknown;
+};
+
 type WhereClause = Record<string, unknown>;
 
 function applyUpdate(record: Record<string, unknown>, data: Record<string, unknown>) {
@@ -85,6 +96,7 @@ function matchesWhere(record: Record<string, unknown>, where: WhereClause): bool
 export function createFakePrisma() {
   const users = new Map<string, FakeUser>();
   const transactions = new Map<string, FakeTransaction>();
+  const servicePricings = new Map<string, FakeServicePricing>();
 
   const userApi = {
     async create({ data }: { data: Record<string, unknown> }) {
@@ -155,7 +167,13 @@ export function createFakePrisma() {
           }
         }
       }
-      const t = { ...data } as FakeTransaction;
+      // Real Prisma auto-populates these via the schema's
+      // `@default(now())` / `@updatedAt` directives - debitWallet() (and
+      // every caller like it) never sets them explicitly, relying on that.
+      // Mirror it here so `transaction.createdAt`/`updatedAt` are never
+      // undefined in a test, the way they would be with a real database.
+      const now = new Date();
+      const t = { createdAt: now, updatedAt: now, ...data } as FakeTransaction;
       transactions.set(t.id, t);
       return { ...t };
     },
@@ -163,6 +181,9 @@ export function createFakePrisma() {
       const t = transactions.get(where.id as string);
       if (!t) throw new Error('FakePrisma: transaction not found');
       applyUpdate(t, data);
+      // Same `@updatedAt` auto-touch as create() above, unless the caller
+      // explicitly set updatedAt itself (some callers do, to backdate it).
+      if (!('updatedAt' in data)) t.updatedAt = new Date();
       return { ...t };
     },
     async updateMany({ where, data }: { where: WhereClause; data: Record<string, unknown> }) {
@@ -170,6 +191,7 @@ export function createFakePrisma() {
       for (const t of transactions.values()) {
         if (matchesWhere(t, where)) {
           applyUpdate(t, data);
+          if (!('updatedAt' in data)) t.updatedAt = new Date();
           count += 1;
         }
       }
@@ -231,15 +253,59 @@ export function createFakePrisma() {
     }
   };
 
+  /** Keyed by the `service` field, matching ServicePricing's real `@unique`
+   *  constraint - the pricing lookups in cac.service.ts / nin-modification.
+   *  service.ts / bvn-modification.service.ts all findUnique/create by
+   *  `service`, never by `id`. */
+  const servicePricingApi = {
+    async findUnique({ where }: { where: WhereClause }) {
+      if (where.service) {
+        const row = servicePricings.get(where.service as string);
+        return row ? { ...row } : null;
+      }
+      for (const row of servicePricings.values()) {
+        if (matchesWhere(row, where)) return { ...row };
+      }
+      return null;
+    },
+    async findUniqueOrThrow(args: { where: WhereClause }) {
+      const row = await servicePricingApi.findUnique(args);
+      if (!row) throw new Error('FakePrisma: servicePricing not found');
+      return row;
+    },
+    async create({ data }: { data: Record<string, unknown> }) {
+      const service = data.service as string;
+      if (servicePricings.has(service)) {
+        throw new FakePrismaClientKnownRequestError('Unique constraint failed on the fields: (`service`)', { code: 'P2002' });
+      }
+      const row = {
+        id: (data.id as string) ?? `pricing-${servicePricings.size + 1}`,
+        isActive: true,
+        sellingPriceKobo: null,
+        ...data
+      } as FakeServicePricing;
+      servicePricings.set(service, row);
+      return { ...row };
+    },
+    async update({ where, data }: { where: WhereClause; data: Record<string, unknown> }) {
+      const row = where.service ? servicePricings.get(where.service as string) : undefined;
+      if (!row) throw new Error('FakePrisma: servicePricing not found');
+      applyUpdate(row, data);
+      return { ...row };
+    }
+  };
+
   type FakePrismaApi = {
     user: typeof userApi;
     transaction: typeof transactionApi;
+    servicePricing: typeof servicePricingApi;
     $transaction<T>(fn: (tx: FakePrismaApi) => Promise<T>): Promise<T>;
   };
 
   const api: FakePrismaApi = {
     user: userApi,
     transaction: transactionApi,
+    servicePricing: servicePricingApi,
     async $transaction<T>(fn: (tx: FakePrismaApi) => Promise<T>): Promise<T> {
       return fn(api);
     }
@@ -251,6 +317,7 @@ export function createFakePrisma() {
     reset() {
       users.clear();
       transactions.clear();
+      servicePricings.clear();
     }
   };
 }

@@ -1,5 +1,5 @@
 import { TransactionType } from '@prisma/client';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 /**
  * Mocks the real database (see src/test-utils/fake-prisma.ts) and outbound

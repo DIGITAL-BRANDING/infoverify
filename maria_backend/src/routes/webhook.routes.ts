@@ -212,7 +212,7 @@ webhookRoutes.post('/katpay', async (req, res) => {
   let event: any;
   try {
     event = JSON.parse(rawBody.toString('utf8'));
-  } catch (parseError) {
+  } catch (_parseError) {
     console.error('[katpay-webhook] rejected - body is not valid JSON despite passing signature verification', {
       bodyPreview: rawBody.toString('utf8').slice(0, 200)
     });
