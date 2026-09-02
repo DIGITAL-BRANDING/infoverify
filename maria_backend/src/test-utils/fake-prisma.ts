@@ -173,7 +173,7 @@ export function createFakePrisma() {
       // Mirror it here so `transaction.createdAt`/`updatedAt` are never
       // undefined in a test, the way they would be with a real database.
       const now = new Date();
-      const t = { createdAt: now, updatedAt: now, ...data } as FakeTransaction;
+      const t = { createdAt: now, updatedAt: now, ...data } as unknown as FakeTransaction;
       transactions.set(t.id, t);
       return { ...t };
     },
