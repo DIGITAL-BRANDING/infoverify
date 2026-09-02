@@ -76,17 +76,28 @@ describe('getBvnModificationPrice / listBvnModificationPrices', () => {
   it('creates a default-priced row per type on first lookup', async () => {
     expect((await getBvnModificationPrice('update_phone')).unitPrice).toBe(3500);
     expect((await getBvnModificationPrice('update_name')).unitPrice).toBe(5000);
-    expect((await getBvnModificationPrice('update_email')).unitPrice).toBe(3000);
+    expect((await getBvnModificationPrice('update_name_dob')).unitPrice).toBe(8000);
   });
 
-  it('lists all five types', async () => {
+  it('lists all eight types', async () => {
     const prices = await listBvnModificationPrices();
-    expect(prices.map((p) => p.type).sort()).toEqual(['update_address', 'update_dob', 'update_email', 'update_name', 'update_phone'].sort());
+    expect(prices.map((p) => p.type).sort()).toEqual(
+      [
+        'update_address',
+        'update_dob',
+        'update_dob_phone',
+        'update_name',
+        'update_name_address',
+        'update_name_dob',
+        'update_name_phone',
+        'update_phone'
+      ].sort()
+    );
   });
 });
 
 describe('submitBvnModificationRequest', () => {
-  const values = { bvn: '12345678901', account_number: '0123456789', bank_name: 'Test Bank', new_phone_number: '08099999999' };
+  const values = { bvn: '12345678901', account_number: '0123456789', enrollment_type: 'Bank', bank_name: 'First Bank', new_phone_number: '08099999999' };
 
   it('debits the wallet by the type price and leaves the transaction PENDING', async () => {
     const userId = await seedUser(20000);
@@ -115,6 +126,23 @@ describe('submitBvnModificationRequest', () => {
     const header = Buffer.from(entry.pdf_base64 as string, 'base64').subarray(0, 5).toString('latin1');
     expect(header).toBe('%PDF-');
   });
+
+  it('debits the higher combined-type price for a two-field modification', async () => {
+    const userId = await seedUser(20000);
+    const result = await submitBvnModificationRequest({
+      userId,
+      type: 'update_name_dob',
+      values: {
+        bvn: '12345678901',
+        account_number: '0123456789',
+        enrollment_type: 'Agency',
+        new_first_name: 'Amina',
+        new_last_name: 'Bello',
+        new_date_of_birth: '1990-01-01'
+      }
+    });
+    expect(result.balanceAfter).toBe(20000 - 8000);
+  });
 });
 
 describe('listBvnModificationHistory', () => {
@@ -122,8 +150,8 @@ describe('listBvnModificationHistory', () => {
     const userId = await seedUser(20000);
     await submitBvnModificationRequest({
       userId,
-      type: 'update_email',
-      values: { bvn: '12345678901', account_number: '0123456789', bank_name: 'Test Bank', new_email: 'new@example.test' }
+      type: 'update_address',
+      values: { bvn: '12345678901', account_number: '0123456789', enrollment_type: 'Agency', new_address: '1 Main St', new_state: 'Kano', new_lga: 'Nassarawa' }
     });
 
     expect(await listBvnModificationHistory({ userId })).toHaveLength(0);
@@ -133,15 +161,15 @@ describe('listBvnModificationHistory', () => {
     const userId = await seedUser(20000);
     await submitBvnModificationRequest({
       userId,
-      type: 'update_email',
-      values: { bvn: '12345678901', account_number: '0123456789', bank_name: 'Test Bank', new_email: 'new@example.test' }
+      type: 'update_address',
+      values: { bvn: '12345678901', account_number: '0123456789', enrollment_type: 'Agency', new_address: '1 Main St', new_state: 'Kano', new_lga: 'Nassarawa' }
     });
     const tx = (await prisma.transaction.findFirst({ where: { userId } }))!;
     await completeBvnModification({ transactionId: tx.id });
 
     expect(await listBvnModificationHistory({ userId })).toHaveLength(1);
     expect(await listBvnModificationHistory({ userId, type: 'update_phone' })).toHaveLength(0);
-    expect(await listBvnModificationHistory({ userId, type: 'update_email' })).toHaveLength(1);
+    expect(await listBvnModificationHistory({ userId, type: 'update_address' })).toHaveLength(1);
   });
 });
 
@@ -151,7 +179,7 @@ describe('completeBvnModification', () => {
     await submitBvnModificationRequest({
       userId,
       type: 'update_phone',
-      values: { bvn: '12345678901', account_number: '0123456789', bank_name: 'Test Bank', new_phone_number: '08099999999' }
+      values: { bvn: '12345678901', account_number: '0123456789', enrollment_type: 'Agency', new_phone_number: '08099999999' }
     });
     const tx = (await prisma.transaction.findFirst({ where: { userId } }))!;
     await completeBvnModification({ transactionId: tx.id });

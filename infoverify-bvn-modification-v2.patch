@@ -1,0 +1,907 @@
+From b07684966b2b3ffaba4ac1d6823833b97126c93f Mon Sep 17 00:00:00 2001
+From: Claude <dev@infoverify.local>
+Date: Wed, 2 Sep 2026 06:11:59 +0000
+Subject: [PATCH] Rebuild BVN Modification: 8 modification types, Enrollment
+ Type (Agency/Bank) with bank list, and a guided 'not sure?' BVN/NIN DOB-match
+ check
+
+---
+ .../src/routes/bvn-modification.routes.ts     |  61 +++-
+ .../bvn-modification.service.test.ts          |  48 ++-
+ .../src/services/bvn-modification.service.ts  | 221 ++++++++++---
+ web/src/pages/BvnModificationPage.tsx         | 308 ++++++++++++++----
+ 4 files changed, 514 insertions(+), 124 deletions(-)
+
+diff --git a/maria_backend/src/routes/bvn-modification.routes.ts b/maria_backend/src/routes/bvn-modification.routes.ts
+index 6628772..3483aa1 100644
+--- a/maria_backend/src/routes/bvn-modification.routes.ts
++++ b/maria_backend/src/routes/bvn-modification.routes.ts
+@@ -9,7 +9,8 @@ import {
+   type BvnModificationType,
+   listBvnModificationHistory,
+   listBvnModificationPrices,
+-  submitBvnModificationRequest
++  submitBvnModificationRequest,
++  verifyBvnNinMatch
+ } from '../services/bvn-modification.service.js';
+ 
+ export const bvnModificationRoutes = Router();
+@@ -36,19 +37,43 @@ function zodFor(field: BvnModificationField): ZodTypeAny {
+     case 'date':
+       schema = z.string().trim().min(1);
+       break;
++    case 'select':
++      schema = field.options ? z.enum(field.options as [string, ...string[]]) : z.string().trim().min(1);
++      break;
+     default:
+       schema = z.string().trim().min(1).max(200);
+   }
+-  return field.required ? schema : schema.optional().or(z.literal(''));
++  // A `dependsOn` field (currently only `bank_name`, shown/required only
++  // when `enrollment_type` is "Bank") is always optional at the per-field
++  // level - the conditional "actually required when X" check happens once,
++  // object-wide, in schemaFor()'s `.superRefine()` below, since that's the
++  // only place multiple fields can be compared against each other.
++  return field.required && !field.dependsOn ? schema : schema.optional().or(z.literal(''));
+ }
+ 
+ /** Builds { bvn: z..., account_number: z..., ... } straight from the type's field config, so a new field only ever needs updating in bvn-modification.service.ts. */
+ function schemaFor(type: BvnModificationType) {
++  const fields = BVN_MODIFICATION_CONFIG[type].fields;
+   const shape: Record<string, ZodTypeAny> = {};
+-  for (const field of BVN_MODIFICATION_CONFIG[type].fields) {
++  for (const field of fields) {
+     shape[field.key] = zodFor(field);
+   }
+-  return z.object({ ...shape, ...pinField });
++  const base = z.object({ ...shape, ...pinField });
++
++  const conditional = fields.filter((f) => f.dependsOn && f.required);
++  if (conditional.length === 0) return base;
++
++  return base.superRefine((value, ctx) => {
++    const record = value as Record<string, unknown>;
++    for (const field of conditional) {
++      const dependsOn = field.dependsOn!;
++      if (record[dependsOn.key] !== dependsOn.value) continue;
++      const current = record[field.key];
++      if (typeof current !== 'string' || current.trim().length === 0) {
++        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [field.key], message: `${field.label} is required` });
++      }
++    }
++  });
+ }
+ 
+ // ── Config + prices ─────────────────────────────────────────────
+@@ -61,7 +86,9 @@ bvnModificationRoutes.get('/types', (_req, res) => {
+       key: field.key,
+       label: field.label,
+       required: field.required,
+-      input: field.input
++      input: field.input,
++      options: field.options,
++      dependsOn: field.dependsOn
+     }))
+   }));
+   res.json({ status: true, data });
+@@ -81,6 +108,30 @@ bvnModificationRoutes.get('/history', async (req, res) => {
+   res.json({ status: true, data });
+ });
+ 
++// ── "Not sure what's wrong?" BVN/NIN date-of-birth match check ─────
++// See the long comment above verifyBvnNinMatch() in
++// bvn-modification.service.ts for what this actually does and why it costs
++// real money (two real Techhub purchases, same price as BVN Verification +
++// NIN Verification individually - nothing extra).
++
++bvnModificationRoutes.post('/verify-match', async (req, res) => {
++  const body = z
++    .object({
++      bvn: z.string().trim().length(11, 'Must be exactly 11 digits'),
++      nin: z.string().trim().length(11, 'Must be exactly 11 digits'),
++      ...pinField
++    })
++    .parse(req.body);
++  await requirePinConfirmation(req.user!.id, body.pin);
++  const result = await verifyBvnNinMatch({
++    userId: req.user!.id,
++    bvn: body.bvn,
++    nin: body.nin,
++    idempotencyKey: idempotencyKeyFrom(req)
++  });
++  res.json({ status: true, data: result });
++});
++
+ // ── Submit (one route per type, each validated against that type's own
+ // field config) ─────────────────────────────────────────────────────────
+ 
+diff --git a/maria_backend/src/services/__tests__/bvn-modification.service.test.ts b/maria_backend/src/services/__tests__/bvn-modification.service.test.ts
+index 5f210d9..935b158 100644
+--- a/maria_backend/src/services/__tests__/bvn-modification.service.test.ts
++++ b/maria_backend/src/services/__tests__/bvn-modification.service.test.ts
+@@ -76,17 +76,28 @@ describe('getBvnModificationPrice / listBvnModificationPrices', () => {
+   it('creates a default-priced row per type on first lookup', async () => {
+     expect((await getBvnModificationPrice('update_phone')).unitPrice).toBe(3500);
+     expect((await getBvnModificationPrice('update_name')).unitPrice).toBe(5000);
+-    expect((await getBvnModificationPrice('update_email')).unitPrice).toBe(3000);
++    expect((await getBvnModificationPrice('update_name_dob')).unitPrice).toBe(8000);
+   });
+ 
+-  it('lists all five types', async () => {
++  it('lists all eight types', async () => {
+     const prices = await listBvnModificationPrices();
+-    expect(prices.map((p) => p.type).sort()).toEqual(['update_address', 'update_dob', 'update_email', 'update_name', 'update_phone'].sort());
++    expect(prices.map((p) => p.type).sort()).toEqual(
++      [
++        'update_address',
++        'update_dob',
++        'update_dob_phone',
++        'update_name',
++        'update_name_address',
++        'update_name_dob',
++        'update_name_phone',
++        'update_phone'
++      ].sort()
++    );
+   });
+ });
+ 
+ describe('submitBvnModificationRequest', () => {
+-  const values = { bvn: '12345678901', account_number: '0123456789', bank_name: 'Test Bank', new_phone_number: '08099999999' };
++  const values = { bvn: '12345678901', account_number: '0123456789', enrollment_type: 'Bank', bank_name: 'First Bank', new_phone_number: '08099999999' };
+ 
+   it('debits the wallet by the type price and leaves the transaction PENDING', async () => {
+     const userId = await seedUser(20000);
+@@ -115,6 +126,23 @@ describe('submitBvnModificationRequest', () => {
+     const header = Buffer.from(entry.pdf_base64 as string, 'base64').subarray(0, 5).toString('latin1');
+     expect(header).toBe('%PDF-');
+   });
++
++  it('debits the higher combined-type price for a two-field modification', async () => {
++    const userId = await seedUser(20000);
++    const result = await submitBvnModificationRequest({
++      userId,
++      type: 'update_name_dob',
++      values: {
++        bvn: '12345678901',
++        account_number: '0123456789',
++        enrollment_type: 'Agency',
++        new_first_name: 'Amina',
++        new_last_name: 'Bello',
++        new_date_of_birth: '1990-01-01'
++      }
++    });
++    expect(result.balanceAfter).toBe(20000 - 8000);
++  });
+ });
+ 
+ describe('listBvnModificationHistory', () => {
+@@ -122,8 +150,8 @@ describe('listBvnModificationHistory', () => {
+     const userId = await seedUser(20000);
+     await submitBvnModificationRequest({
+       userId,
+-      type: 'update_email',
+-      values: { bvn: '12345678901', account_number: '0123456789', bank_name: 'Test Bank', new_email: 'new@example.test' }
++      type: 'update_address',
++      values: { bvn: '12345678901', account_number: '0123456789', enrollment_type: 'Agency', new_address: '1 Main St', new_state: 'Kano', new_lga: 'Nassarawa' }
+     });
+ 
+     expect(await listBvnModificationHistory({ userId })).toHaveLength(0);
+@@ -133,15 +161,15 @@ describe('listBvnModificationHistory', () => {
+     const userId = await seedUser(20000);
+     await submitBvnModificationRequest({
+       userId,
+-      type: 'update_email',
+-      values: { bvn: '12345678901', account_number: '0123456789', bank_name: 'Test Bank', new_email: 'new@example.test' }
++      type: 'update_address',
++      values: { bvn: '12345678901', account_number: '0123456789', enrollment_type: 'Agency', new_address: '1 Main St', new_state: 'Kano', new_lga: 'Nassarawa' }
+     });
+     const tx = (await prisma.transaction.findFirst({ where: { userId } }))!;
+     await completeBvnModification({ transactionId: tx.id });
+ 
+     expect(await listBvnModificationHistory({ userId })).toHaveLength(1);
+     expect(await listBvnModificationHistory({ userId, type: 'update_phone' })).toHaveLength(0);
+-    expect(await listBvnModificationHistory({ userId, type: 'update_email' })).toHaveLength(1);
++    expect(await listBvnModificationHistory({ userId, type: 'update_address' })).toHaveLength(1);
+   });
+ });
+ 
+@@ -151,7 +179,7 @@ describe('completeBvnModification', () => {
+     await submitBvnModificationRequest({
+       userId,
+       type: 'update_phone',
+-      values: { bvn: '12345678901', account_number: '0123456789', bank_name: 'Test Bank', new_phone_number: '08099999999' }
++      values: { bvn: '12345678901', account_number: '0123456789', enrollment_type: 'Agency', new_phone_number: '08099999999' }
+     });
+     const tx = (await prisma.transaction.findFirst({ where: { userId } }))!;
+     await completeBvnModification({ transactionId: tx.id });
+diff --git a/maria_backend/src/services/bvn-modification.service.ts b/maria_backend/src/services/bvn-modification.service.ts
+index 9df821e..432b709 100644
+--- a/maria_backend/src/services/bvn-modification.service.ts
++++ b/maria_backend/src/services/bvn-modification.service.ts
+@@ -5,6 +5,7 @@ import { sealPII, openPII } from '../lib/pii.js';
+ import { prisma } from '../lib/prisma.js';
+ import { ApiError } from '../middleware/error.js';
+ import { debitWallet } from './wallet.service.js';
++import { purchaseBvnSlip, purchaseNinByNin } from './verification.service.js';
+ 
+ /**
+  * BVN Modification — same manual pattern as NIN Modification
+@@ -16,21 +17,39 @@ import { debitWallet } from './wallet.service.js';
+  * either marks it complete (completeBvnModification()) or rejects it (the
+  * existing generic "reverse" action, which refunds).
+  *
+- * Every type asks for the account number + bank name alongside the BVN
+- * itself, since that's the minimum an agent portal needs to actually locate
+- * and verify the record before changing anything on it.
++ * Every type asks for the account number + enrollment type (agency or a
++ * named bank) alongside the BVN itself, since that's the minimum an agent
++ * portal needs to actually locate and verify the record before changing
++ * anything on it.
+  */
+-export const BVN_MODIFICATION_TYPES = ['update_phone', 'update_name', 'update_dob', 'update_address', 'update_email'] as const;
++export const BVN_MODIFICATION_TYPES = [
++  'update_name',
++  'update_phone',
++  'update_dob',
++  'update_address',
++  'update_name_dob',
++  'update_name_phone',
++  'update_name_address',
++  'update_dob_phone'
++] as const;
+ 
+ export type BvnModificationType = (typeof BVN_MODIFICATION_TYPES)[number];
+ 
+-export type BvnModificationFieldInput = 'text' | 'date' | 'phone' | 'email' | 'bvn';
++export type BvnModificationFieldInput = 'text' | 'date' | 'phone' | 'email' | 'bvn' | 'select';
+ 
+ export type BvnModificationField = {
+   key: string;
+   label: string;
+   required: boolean;
+   input: BvnModificationFieldInput;
++  /** Only for input: 'select'. */
++  options?: string[];
++  /** Only rendered/required when the named field currently holds `value` -
++   *  e.g. `bank_name` only makes sense once `enrollment_type` is "Bank".
++   *  The frontend is responsible for the show/hide; the backend schema
++   *  (routes/bvn-modification.routes.ts) makes the field itself optional
++   *  and validates the conditional requirement separately. */
++  dependsOn?: { key: string; value: string };
+ };
+ 
+ type BvnModificationTypeConfig = {
+@@ -40,54 +59,79 @@ type BvnModificationTypeConfig = {
+   fields: BvnModificationField[];
+ };
+ 
++export const BVN_MODIFICATION_BANKS = [
++  'Micro Finance Bank',
++  'First Bank',
++  'Access Bank',
++  'Heritage Bank',
++  'Enterprise Bank',
++  'BOA Bank',
++  'LAPO Bank',
++  'NIBSS'
++] as const;
++
+ // Every type starts with these three - the minimum an agent portal needs to
+-// locate and verify the record before changing anything on it.
++// locate and verify the record before changing anything on it. "Bank Name"
++// only appears once "Bank" is chosen as the enrollment type (an agency
++// enrollment has no associated bank) - see `dependsOn` above.
+ const identifyingFields: BvnModificationField[] = [
+   { key: 'bvn', label: 'BVN Number', required: true, input: 'bvn' },
+   { key: 'account_number', label: 'Account Number', required: true, input: 'text' },
+-  { key: 'bank_name', label: 'Bank Name', required: true, input: 'text' }
++  { key: 'enrollment_type', label: 'Enrollment Type', required: true, input: 'select', options: ['Agency', 'Bank'] },
++  {
++    key: 'bank_name',
++    label: 'Bank Name',
++    required: true,
++    input: 'select',
++    options: [...BVN_MODIFICATION_BANKS],
++    dependsOn: { key: 'enrollment_type', value: 'Bank' }
++  }
++];
++
++const nameFields: BvnModificationField[] = [
++  { key: 'new_first_name', label: 'New First Name', required: true, input: 'text' },
++  { key: 'new_last_name', label: 'New Last Name', required: true, input: 'text' },
++  { key: 'new_middle_name', label: 'New Middle Name', required: false, input: 'text' }
++];
++const phoneFields: BvnModificationField[] = [
++  { key: 'new_phone_number', label: 'New Phone Number', required: true, input: 'phone' },
++  { key: 'second_phone_number', label: 'Second Phone Number', required: false, input: 'phone' }
++];
++const dobFields: BvnModificationField[] = [{ key: 'new_date_of_birth', label: 'New Date of Birth', required: true, input: 'date' }];
++const addressFields: BvnModificationField[] = [
++  { key: 'new_address', label: 'New Address', required: true, input: 'text' },
++  { key: 'new_state', label: 'State', required: true, input: 'text' },
++  { key: 'new_lga', label: 'L.G.A', required: true, input: 'text' }
+ ];
+ 
+ export const BVN_MODIFICATION_CONFIG: Record<BvnModificationType, BvnModificationTypeConfig> = {
+-  update_phone: {
+-    id: 'update_phone',
+-    title: 'Update Phone Number',
+-    price: 3500,
+-    fields: [...identifyingFields, { key: 'new_phone_number', label: 'New Phone Number', required: true, input: 'phone' }]
+-  },
+-  update_name: {
+-    id: 'update_name',
+-    title: 'Update Name',
+-    price: 5000,
+-    fields: [
+-      ...identifyingFields,
+-      { key: 'new_first_name', label: 'New First Name', required: true, input: 'text' },
+-      { key: 'new_last_name', label: 'New Last Name', required: true, input: 'text' },
+-      { key: 'new_middle_name', label: 'New Middle Name', required: false, input: 'text' }
+-    ]
++  update_name: { id: 'update_name', title: 'Update Name', price: 5000, fields: [...identifyingFields, ...nameFields] },
++  update_phone: { id: 'update_phone', title: 'Update Phone Number', price: 3500, fields: [...identifyingFields, ...phoneFields] },
++  update_dob: { id: 'update_dob', title: 'Update Date of Birth', price: 5000, fields: [...identifyingFields, ...dobFields] },
++  update_address: { id: 'update_address', title: 'Update Address', price: 3500, fields: [...identifyingFields, ...addressFields] },
++  update_name_dob: {
++    id: 'update_name_dob',
++    title: 'Update Name & DOB',
++    price: 8000,
++    fields: [...identifyingFields, ...nameFields, ...dobFields]
+   },
+-  update_dob: {
+-    id: 'update_dob',
+-    title: 'Update Date of Birth',
+-    price: 5000,
+-    fields: [...identifyingFields, { key: 'new_date_of_birth', label: 'New Date of Birth', required: true, input: 'date' }]
++  update_name_phone: {
++    id: 'update_name_phone',
++    title: 'Update Name & Phone',
++    price: 7500,
++    fields: [...identifyingFields, ...nameFields, ...phoneFields]
+   },
+-  update_address: {
+-    id: 'update_address',
+-    title: 'Update Address',
+-    price: 3500,
+-    fields: [
+-      ...identifyingFields,
+-      { key: 'new_address', label: 'New Address', required: true, input: 'text' },
+-      { key: 'new_state', label: 'State', required: true, input: 'text' },
+-      { key: 'new_lga', label: 'L.G.A', required: true, input: 'text' }
+-    ]
++  update_name_address: {
++    id: 'update_name_address',
++    title: 'Update Name & Address',
++    price: 7500,
++    fields: [...identifyingFields, ...nameFields, ...addressFields]
+   },
+-  update_email: {
+-    id: 'update_email',
+-    title: 'Update Email Address',
+-    price: 3000,
+-    fields: [...identifyingFields, { key: 'new_email', label: 'New Email Address', required: true, input: 'email' }]
++  update_dob_phone: {
++    id: 'update_dob_phone',
++    title: 'Update DOB & Phone',
++    price: 7500,
++    fields: [...identifyingFields, ...dobFields, ...phoneFields]
+   }
+ };
+ 
+@@ -316,3 +360,94 @@ export function decryptBvnModificationPII(transaction: { metadata: unknown }) {
+   const metadata = transaction.metadata as Record<string, unknown> | null;
+   return openPII<Record<string, unknown> & { pdf_base64?: string }>(metadata?.pii);
+ }
++
++// ── "Not sure what's wrong?" BVN/NIN match check ────────────────
++//
++// A customer often knows their BVN details are wrong somehow, but not
++// exactly which field - or that BOTH a name AND a date of birth need
++// fixing, when they only came in expecting one. Before picking a
++// modification type, they can instead have the platform pull both their
++// BVN slip and their NIN slip (each a REAL, separately-priced Techhub
++// purchase - reusing purchaseBvnSlip/purchaseNinByNin from
++// verification.service.ts exactly as the BVN Verification and NIN
++// Verification pages do, so this costs whatever those already cost, not a
++// separate fee) and compare the date of birth on each.
++//
++// Techhub doesn't document a single fixed key name for "date of birth"
++// across every endpoint response, so `extractDob` below tries a handful of
++// the field-name variants actually seen in the wild rather than assuming
++// one. If neither slip's data contains a recognisable DOB field at all, the
++// result is reported as "couldn't compare automatically" rather than a
++// silent false "match" - the customer is shown both raw records instead
++// and asked to compare by eye.
++
++const DOB_KEY_CANDIDATES = ['dob', 'date_of_birth', 'dateofbirth', 'birthdate', 'birth_date'];
++
++function extractDob(userData: Record<string, unknown> | undefined | null): string | null {
++  if (!userData) return null;
++  for (const [key, value] of Object.entries(userData)) {
++    if (typeof value !== 'string' || !value.trim()) continue;
++    const normalizedKey = key.toLowerCase().replace(/[\s_-]/g, '');
++    if (DOB_KEY_CANDIDATES.some((candidate) => normalizedKey === candidate.replace(/[\s_-]/g, ''))) {
++      return value.trim();
++    }
++  }
++  return null;
++}
++
++/** Loose equality for two DOB strings that might be formatted differently
++ *  (e.g. "1994-05-01" vs "01-May-1994") - compares only the digit
++ *  characters, which is resilient to separator/month-name/order
++ *  differences without trying to fully parse every possible date format
++ *  Techhub's various endpoints might return. */
++function dobsLooselyMatch(a: string, b: string): boolean {
++  const digitsA = a.replace(/\D/g, '');
++  const digitsB = b.replace(/\D/g, '');
++  if (!digitsA || !digitsB) return false;
++  const sortedA = digitsA.split('').sort().join('');
++  const sortedB = digitsB.split('').sort().join('');
++  return digitsA === digitsB || sortedA === sortedB;
++}
++
++export type BvnNinMatchResult = {
++  bvn_reference: string;
++  nin_reference: string;
++  bvn_date_of_birth: string | null;
++  nin_date_of_birth: string | null;
++  comparable: boolean;
++  dob_matches: boolean | null;
++  suggested_types: BvnModificationType[];
++  bvn_user_data: Record<string, unknown> | undefined;
++  nin_user_data: Record<string, unknown> | undefined;
++};
++
++export async function verifyBvnNinMatch(params: { userId: string; bvn: string; nin: string; idempotencyKey?: string }): Promise<BvnNinMatchResult> {
++  // Cheapest tier of each, since this check only needs the underlying data
++  // fields (not a premium-format slip image) to compare a date of birth.
++  const [bvnResult, ninResult] = await Promise.all([
++    purchaseBvnSlip({ userId: params.userId, bvn: params.bvn, tier: 'standard', idempotencyKey: params.idempotencyKey ? `${params.idempotencyKey}:bvn` : undefined }),
++    purchaseNinByNin({ userId: params.userId, nin: params.nin, tier: 'regular', idempotencyKey: params.idempotencyKey ? `${params.idempotencyKey}:nin` : undefined })
++  ]);
++
++  if (!bvnResult.status) throw new ApiError(422, bvnResult.message || 'Could not retrieve the BVN record', 'BVN_LOOKUP_FAILED');
++  if (!ninResult.status) throw new ApiError(422, ninResult.message || 'Could not retrieve the NIN record', 'NIN_LOOKUP_FAILED');
++
++  const bvnDob = extractDob(bvnResult.userData);
++  const ninDob = extractDob(ninResult.userData);
++  const comparable = Boolean(bvnDob && ninDob);
++  const dobMatches = comparable ? dobsLooselyMatch(bvnDob as string, ninDob as string) : null;
++
++  const suggestedTypes: BvnModificationType[] = comparable && dobMatches === false ? ['update_dob', 'update_name_dob', 'update_dob_phone'] : [];
++
++  return {
++    bvn_reference: bvnResult.reference,
++    nin_reference: ninResult.reference,
++    bvn_date_of_birth: bvnDob,
++    nin_date_of_birth: ninDob,
++    comparable,
++    dob_matches: dobMatches,
++    suggested_types: suggestedTypes,
++    bvn_user_data: bvnResult.userData,
++    nin_user_data: ninResult.userData
++  };
++}
+diff --git a/web/src/pages/BvnModificationPage.tsx b/web/src/pages/BvnModificationPage.tsx
+index b0ca9c8..28f3385 100644
+--- a/web/src/pages/BvnModificationPage.tsx
++++ b/web/src/pages/BvnModificationPage.tsx
+@@ -1,25 +1,52 @@
+ import { useEffect, useMemo, useState, type FormEvent } from 'react';
+ import { useNavigate } from 'react-router-dom';
+-import { Download, Loader2, PenLine } from 'lucide-react';
++import { AlertTriangle, CheckCircle2, Download, HelpCircle, Loader2, ShieldCheck, XCircle } from 'lucide-react';
+ import AppShell from '../components/AppShell';
+ import { api, ApiError } from '../lib/api';
+ import { PinConfirmDialog } from '../components/PinConfirmDialog';
+ import { BvnModificationConsent } from '../components/BvnModificationConsent';
++import {
++  PageHeader,
++  FORM_SECTION_CLASSES,
++  FORM_INPUT_CLASSES,
++  FORM_LABEL_CLASSES,
++  FORM_HELP_CLASSES,
++  TILE_CLASSES,
++  TILE_SELECTED_CLASSES,
++  money,
++} from '../components/verification/shared';
+ 
+-type FieldInput = 'text' | 'date' | 'phone' | 'email' | 'bvn';
+-type Field = { key: string; label: string; required: boolean; input: FieldInput };
++type FieldInput = 'text' | 'date' | 'phone' | 'email' | 'bvn' | 'select';
++type Field = { key: string; label: string; required: boolean; input: FieldInput; options?: string[]; dependsOn?: { key: string; value: string } };
+ type TypeConfig = { id: string; title: string; fields: Field[] };
+ type PriceRow = { type: string; title: string; unitPrice: number; isActive: boolean };
+ type HistoryEntry = { reference: string; status: string; created_at: string; pdf_base64: string | null; modification_type: string | null };
++type MatchResult = {
++  bvn_date_of_birth: string | null;
++  nin_date_of_birth: string | null;
++  comparable: boolean;
++  dob_matches: boolean | null;
++  suggested_types: string[];
++};
+ 
+-const money = (amount?: number) =>
+-  amount === undefined ? '…' : `₦${amount.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`;
++const TYPE_ORDER = [
++  'update_name',
++  'update_phone',
++  'update_dob',
++  'update_address',
++  'update_name_dob',
++  'update_name_phone',
++  'update_name_address',
++  'update_dob_phone'
++];
+ 
+-const TYPE_ORDER = ['update_phone', 'update_name', 'update_dob', 'update_address', 'update_email'];
++type Stage = 'decide' | 'verify' | 'select' | 'form';
+ 
+ export default function BvnModificationPage() {
+   const nav = useNavigate();
+   const [consent, setConsent] = useState(true);
++  const [stage, setStage] = useState<Stage>('decide');
++
+   const [types, setTypes] = useState<TypeConfig[]>([]);
+   const [prices, setPrices] = useState<Record<string, number>>({});
+   const [selectedType, setSelectedType] = useState<string | null>(null);
+@@ -31,6 +58,14 @@ export default function BvnModificationPage() {
+   const [history, setHistory] = useState<HistoryEntry[]>([]);
+   const [loadingHistory, setLoadingHistory] = useState(false);
+ 
++  // "Not sure?" verify sub-flow
++  const [verifyBvn, setVerifyBvn] = useState('');
++  const [verifyNin, setVerifyNin] = useState('');
++  const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
++  const [verifyBusy, setVerifyBusy] = useState(false);
++  const [verifyMessage, setVerifyMessage] = useState('');
++  const [showVerifyPin, setShowVerifyPin] = useState(false);
++
+   useEffect(() => {
+     Promise.all([
+       api.get<{ data: TypeConfig[] }>('/bvn-modification/types'),
+@@ -52,6 +87,7 @@ export default function BvnModificationPage() {
+     setValues({});
+     setMessage('');
+     setReference('');
++    setStage('form');
+   }
+ 
+   async function loadHistory(type: string) {
+@@ -71,6 +107,29 @@ export default function BvnModificationPage() {
+     else setHistory([]);
+   }, [selectedType]);
+ 
++  function prepareVerify(event: FormEvent) {
++    event.preventDefault();
++    setShowVerifyPin(true);
++  }
++
++  async function submitVerify(pin: string) {
++    setShowVerifyPin(false);
++    setVerifyBusy(true);
++    setVerifyMessage('');
++    try {
++      const result = await api.post<{ status: boolean; message?: string; data: MatchResult }>('/bvn-modification/verify-match', {
++        bvn: verifyBvn,
++        nin: verifyNin,
++        pin
++      });
++      setMatchResult(result.data);
++    } catch (error) {
++      setVerifyMessage(error instanceof ApiError ? error.message : 'Could not complete the check. Please try again.');
++    } finally {
++      setVerifyBusy(false);
++    }
++  }
++
+   function prepare(event: FormEvent) {
+     event.preventDefault();
+     setShowPin(true);
+@@ -100,44 +159,148 @@ export default function BvnModificationPage() {
+ 
+   return (
+     <AppShell>
+-      <div className="verification-blue-page mx-auto max-w-5xl">
++      <div className="mx-auto max-w-5xl">
+         <button
+-          onClick={() => (selected ? setSelectedType(null) : nav('/bvn-services'))}
+-          className="font-body text-sm font-semibold text-gold-700"
++          onClick={() => {
++            if (stage === 'form' || stage === 'select') return setStage('decide');
++            if (stage === 'verify') return setStage('decide');
++            nav('/bvn-services');
++          }}
++          className="font-body text-sm font-semibold text-[#0b2f73]"
+         >
+-          ← {selected ? 'All modification types' : 'BVN Services'}
++          ← {stage === 'decide' ? 'BVN Services' : 'Start over'}
+         </button>
+ 
+-        <header className="mt-5 rounded-2xl border border-parchment-line bg-parchment p-6">
+-          <p className="font-body text-sm font-semibold text-gold-700">Identity services</p>
+-          <h1 className="mt-1 font-display text-3xl font-bold text-ink">BVN Modification</h1>
+-          <p className="mt-2 font-body text-sm text-ink-600">
+-            Update your Bank Verification Number (BVN) information. Select the type of modification you need and
+-            provide the required details. Requests are reviewed and processed by an agent - this is not an instant,
+-            automatic update.
+-          </p>
+-        </header>
+-
+-        {!selected ? (
+-          <section className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
+-            {types.map((type) => (
++        <PageHeader
++          title="BVN Modification"
++          subtitle="Update your Bank Verification Number (BVN) information. Requests are reviewed and processed by an agent - this is not an instant, automatic update."
++        />
++
++        {stage === 'decide' && (
++          <section className={FORM_SECTION_CLASSES}>
++            <h2 className="font-display text-lg font-bold text-[#0b2f73]">Do you already know exactly what needs fixing?</h2>
++            <p className={`mt-2 ${FORM_HELP_CLASSES}`}>
++              A single BVN can need more than one correction at once (for example, both the name and the date of
++              birth). If you're not certain, we can check your BVN and NIN records against each other first, so you
++              don't submit the wrong type of request.
++            </p>
++
++            <div className="mt-5 grid gap-4 sm:grid-cols-2">
++              <button
++                onClick={() => setStage('select')}
++                className={`${TILE_CLASSES} flex flex-col items-center gap-2 p-6`}
++              >
++                <CheckCircle2 size={28} />
++                <span className="font-display text-base font-bold">I know exactly what to fix</span>
++                <span className="text-xs text-white/80">Go straight to picking a modification type</span>
++              </button>
+               <button
+-                key={type.id}
+-                onClick={() => pickType(type.id)}
+-                className="group flex min-h-32 flex-col items-center justify-center rounded-2xl border border-[#8b6914] bg-[#6b4f0b] p-4 text-center shadow-md shadow-[#6b4f0b]/20 transition hover:-translate-y-1 hover:bg-[#8a6712] hover:shadow-lg"
++                onClick={() => setStage('verify')}
++                className={`${TILE_CLASSES} flex flex-col items-center gap-2 p-6`}
+               >
+-                <span className="rounded-xl bg-[#f7d774] p-3 text-[#4a3505] shadow-sm">
+-                  <PenLine size={22} />
+-                </span>
+-                <span className="mt-3 font-body text-sm font-semibold text-white">{type.title}</span>
+-                <span className="mt-1 font-body text-sm font-bold text-[#ffe9a3]">{money(prices[type.id])}</span>
++                <HelpCircle size={28} />
++                <span className="font-display text-base font-bold">I'm not sure — check first</span>
++                <span className="text-xs text-white/80">Compare your BVN &amp; NIN date of birth</span>
+               </button>
+-            ))}
++            </div>
+           </section>
+-        ) : (
+-          <section className="mt-6 rounded-2xl border border-parchment-line bg-parchment p-6">
++        )}
++
++        {stage === 'verify' && (
++          <section className={FORM_SECTION_CLASSES}>
++            <h2 className="font-display text-lg font-bold text-[#0b2f73]">Check BVN &amp; NIN together</h2>
++            <p className={`mt-2 ${FORM_HELP_CLASSES}`}>
++              We'll pull your BVN slip and your NIN record and compare the date of birth on each. This uses the same
++              BVN Verification and NIN Verification lookups as elsewhere in the app, so it's charged at their normal
++              price — not an extra fee.
++            </p>
++
++            {!matchResult ? (
++              <form onSubmit={prepareVerify} className="mt-5 grid gap-4 sm:grid-cols-2">
++                <label className={FORM_LABEL_CLASSES}>
++                  BVN Number
++                  <input required inputMode="numeric" maxLength={11} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={verifyBvn} onChange={(e) => setVerifyBvn(e.target.value)} />
++                </label>
++                <label className={FORM_LABEL_CLASSES}>
++                  NIN Number
++                  <input required inputMode="numeric" maxLength={11} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={verifyNin} onChange={(e) => setVerifyNin(e.target.value)} />
++                </label>
++                <div className="sm:col-span-2">
++                  <button disabled={verifyBusy} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b2f73] py-3 font-display font-semibold text-white disabled:opacity-60 sm:w-auto sm:px-8">
++                    {verifyBusy ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
++                    Run the check
++                  </button>
++                  {verifyMessage && <p className="mt-3 rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{verifyMessage}</p>}
++                </div>
++              </form>
++            ) : (
++              <div className="mt-5">
++                {!matchResult.comparable ? (
++                  <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
++                    <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-600" />
++                    <div>
++                      <p className="font-body text-sm font-semibold text-amber-800">Couldn't compare automatically</p>
++                      <p className="mt-1 font-body text-xs text-amber-700">
++                        Both records were retrieved, but we couldn't find a recognisable date of birth field on one or
++                        both. Please pick the modification type yourself below.
++                      </p>
++                    </div>
++                  </div>
++                ) : matchResult.dob_matches ? (
++                  <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
++                    <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-emerald-600" />
++                    <div>
++                      <p className="font-body text-sm font-semibold text-emerald-800">Date of birth matches on both records</p>
++                      <p className="mt-1 font-body text-xs text-emerald-700">
++                        BVN: {matchResult.bvn_date_of_birth} · NIN: {matchResult.nin_date_of_birth}. Your date of birth
++                        is not the issue — pick whichever other field needs correcting below.
++                      </p>
++                    </div>
++                  </div>
++                ) : (
++                  <div className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4">
++                    <XCircle size={20} className="mt-0.5 shrink-0 text-rose-600" />
++                    <div>
++                      <p className="font-body text-sm font-semibold text-rose-800">Date of birth does not match</p>
++                      <p className="mt-1 font-body text-xs text-rose-700">
++                        BVN: {matchResult.bvn_date_of_birth} · NIN: {matchResult.nin_date_of_birth}. You likely need a
++                        Date of Birth correction — highlighted below.
++                      </p>
++                    </div>
++                  </div>
++                )}
++
++                <button onClick={() => setStage('select')} className="mt-5 w-full rounded-xl bg-[#0b2f73] py-3 font-display font-semibold text-white sm:w-auto sm:px-8">
++                  Continue to pick a modification type
++                </button>
++              </div>
++            )}
++          </section>
++        )}
++
++        {stage === 'select' && (
++          <section className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
++            {types.map((type) => {
++              const suggested = matchResult?.suggested_types?.includes(type.id);
++              return (
++                <button
++                  key={type.id}
++                  onClick={() => pickType(type.id)}
++                  className={`${TILE_CLASSES} ${suggested ? TILE_SELECTED_CLASSES : ''} relative flex min-h-28 flex-col items-center justify-center text-center`}
++                >
++                  {suggested && <span className="absolute -top-2 left-1/2 -translate-x-1/2 rounded-full bg-gold-400 px-2 py-0.5 text-[10px] font-bold text-[#4a3505]">Suggested</span>}
++                  <span className="font-body text-sm font-semibold">{type.title}</span>
++                  <span className="mt-1 text-xs font-bold text-gold-300">{money(prices[type.id])}</span>
++                </button>
++              );
++            })}
++          </section>
++        )}
++
++        {stage === 'form' && selected && (
++          <section className={FORM_SECTION_CLASSES}>
+             <div className="flex flex-wrap items-center justify-between gap-3">
+-              <h2 className="font-display text-xl font-bold text-ink">{selected.title}</h2>
++              <h2 className="font-display text-xl font-bold text-[#0b2f73]">{selected.title}</h2>
+               <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">
+                 Service cost: {money(selectedPrice)}
+               </span>
+@@ -145,30 +308,49 @@ export default function BvnModificationPage() {
+ 
+             {!reference ? (
+               <form onSubmit={prepare} className="mt-5 grid gap-4 sm:grid-cols-2">
+-                {selected.fields.map((field) => (
+-                  <label key={field.key} className="font-body text-sm font-medium text-ink-600">
+-                    {field.label}
+-                    {!field.required && <span className="ml-1 text-xs font-normal text-ink-400">(optional)</span>}
+-                    <input
+-                      required={field.required}
+-                      type={field.input === 'date' ? 'date' : field.input === 'email' ? 'email' : field.input === 'phone' || field.input === 'bvn' ? 'tel' : 'text'}
+-                      inputMode={field.input === 'phone' || field.input === 'bvn' ? 'numeric' : undefined}
+-                      maxLength={field.input === 'phone' || field.input === 'bvn' ? 11 : undefined}
+-                      className="mt-1 w-full rounded-xl border border-parchment-line bg-cream p-3 text-ink outline-none focus:border-gold-500"
+-                      value={values[field.key] ?? ''}
+-                      onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
+-                    />
+-                  </label>
+-                ))}
++                {selected.fields.map((field) => {
++                  if (field.dependsOn && values[field.dependsOn.key] !== field.dependsOn.value) return null;
++                  return (
++                    <label key={field.key} className={FORM_LABEL_CLASSES}>
++                      {field.label}
++                      {!field.required && <span className="ml-1 text-xs font-normal text-[#0b2f73]/40">(optional)</span>}
++                      {field.input === 'select' ? (
++                        <select
++                          required={field.required}
++                          className={`mt-1 ${FORM_INPUT_CLASSES}`}
++                          value={values[field.key] ?? ''}
++                          onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
++                        >
++                          <option value="">-- Select {field.label} --</option>
++                          {field.options?.map((opt) => (
++                            <option key={opt} value={opt}>
++                              {opt}
++                            </option>
++                          ))}
++                        </select>
++                      ) : (
++                        <input
++                          required={field.required}
++                          type={field.input === 'date' ? 'date' : field.input === 'email' ? 'email' : field.input === 'phone' || field.input === 'bvn' ? 'tel' : 'text'}
++                          inputMode={field.input === 'phone' || field.input === 'bvn' ? 'numeric' : undefined}
++                          maxLength={field.input === 'phone' || field.input === 'bvn' ? 11 : undefined}
++                          className={`mt-1 ${FORM_INPUT_CLASSES}`}
++                          value={values[field.key] ?? ''}
++                          onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
++                        />
++                      )}
++                    </label>
++                  );
++                })}
+ 
+                 <div className="sm:col-span-2">
+                   <button
+                     disabled={busy}
+-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-gold-500 py-3 font-display font-semibold text-ink disabled:opacity-60"
++                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b2f73] py-3 font-display font-semibold text-white disabled:opacity-60"
+                   >
+                     {busy ? <Loader2 size={16} className="animate-spin" /> : 'Continue to PIN confirmation'}
+                   </button>
+-                  {message && <p className="mt-3 rounded-lg bg-cream p-3 font-body text-sm text-ink-600">{message}</p>}
++                  {message && <p className="mt-3 rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>}
+                 </div>
+               </form>
+             ) : (
+@@ -177,7 +359,7 @@ export default function BvnModificationPage() {
+                 <p className="mt-1 font-body text-xs text-emerald-700">Reference: {reference}</p>
+                 <button
+                   onClick={() => setReference('')}
+-                  className="mt-4 rounded-xl bg-gold-500 px-5 py-2.5 font-display text-sm font-semibold text-ink"
++                  className="mt-4 rounded-xl bg-[#0b2f73] px-5 py-2.5 font-display text-sm font-semibold text-white"
+                 >
+                   Submit another request
+                 </button>
+@@ -185,18 +367,15 @@ export default function BvnModificationPage() {
+             )}
+ 
+             <div className="mt-8">
+-              <h3 className="font-body text-sm font-semibold text-ink-600">Recent requests</h3>
++              <h3 className={FORM_LABEL_CLASSES}>Recent requests</h3>
+               {loadingHistory ? (
+-                <p className="mt-2 font-body text-xs text-ink-400">Loading…</p>
++                <p className={`mt-2 ${FORM_HELP_CLASSES}`}>Loading…</p>
+               ) : history.length === 0 ? (
+-                <p className="mt-2 font-body text-xs text-ink-400">No requests yet for this type.</p>
++                <p className={`mt-2 ${FORM_HELP_CLASSES}`}>No requests yet for this type.</p>
+               ) : (
+                 <ul className="mt-2 space-y-2">
+                   {history.map((entry) => (
+-                    <li
+-                      key={entry.reference}
+-                      className="flex items-center justify-between rounded-xl border border-parchment-line bg-cream p-3 font-body text-xs text-ink-600"
+-                    >
++                    <li key={entry.reference} className="flex items-center justify-between rounded-xl border border-blue-100 bg-blue-50 p-3 font-body text-xs text-[#0b2f73]">
+                       <span>
+                         {entry.reference} · {new Date(entry.created_at).toLocaleString()} ·{' '}
+                         <span
+@@ -212,11 +391,7 @@ export default function BvnModificationPage() {
+                         </span>
+                       </span>
+                       {entry.pdf_base64 && (
+-                        <a
+-                          href={`data:application/pdf;base64,${entry.pdf_base64}`}
+-                          download={`${entry.reference}.pdf`}
+-                          className="flex items-center gap-1 font-semibold text-gold-700"
+-                        >
++                        <a href={`data:application/pdf;base64,${entry.pdf_base64}`} download={`${entry.reference}.pdf`} className="flex items-center gap-1 font-semibold text-[#0b2f73]">
+                           <Download size={12} /> PDF
+                         </a>
+                       )}
+@@ -229,8 +404,9 @@ export default function BvnModificationPage() {
+         )}
+       </div>
+ 
+-      <BvnModificationConsent open={consent} onAgree={() => setConsent(false)} onClose={() => nav('/bvn-services')} />
++      <PinConfirmDialog open={showVerifyPin} onClose={() => setShowVerifyPin(false)} onVerified={submitVerify} />
+       <PinConfirmDialog open={showPin} onClose={() => setShowPin(false)} onVerified={submit} />
++      <BvnModificationConsent open={consent} onAgree={() => setConsent(false)} onClose={() => nav('/bvn-services')} />
+     </AppShell>
+   );
+ }
+-- 
+2.43.0
+

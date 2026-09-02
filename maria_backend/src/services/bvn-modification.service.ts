@@ -5,6 +5,7 @@ import { sealPII, openPII } from '../lib/pii.js';
 import { prisma } from '../lib/prisma.js';
 import { ApiError } from '../middleware/error.js';
 import { debitWallet } from './wallet.service.js';
+import { purchaseBvnSlip, purchaseNinByNin } from './verification.service.js';
 
 /**
  * BVN Modification — same manual pattern as NIN Modification
@@ -16,21 +17,39 @@ import { debitWallet } from './wallet.service.js';
  * either marks it complete (completeBvnModification()) or rejects it (the
  * existing generic "reverse" action, which refunds).
  *
- * Every type asks for the account number + bank name alongside the BVN
- * itself, since that's the minimum an agent portal needs to actually locate
- * and verify the record before changing anything on it.
+ * Every type asks for the account number + enrollment type (agency or a
+ * named bank) alongside the BVN itself, since that's the minimum an agent
+ * portal needs to actually locate and verify the record before changing
+ * anything on it.
  */
-export const BVN_MODIFICATION_TYPES = ['update_phone', 'update_name', 'update_dob', 'update_address', 'update_email'] as const;
+export const BVN_MODIFICATION_TYPES = [
+  'update_name',
+  'update_phone',
+  'update_dob',
+  'update_address',
+  'update_name_dob',
+  'update_name_phone',
+  'update_name_address',
+  'update_dob_phone'
+] as const;
 
 export type BvnModificationType = (typeof BVN_MODIFICATION_TYPES)[number];
 
-export type BvnModificationFieldInput = 'text' | 'date' | 'phone' | 'email' | 'bvn';
+export type BvnModificationFieldInput = 'text' | 'date' | 'phone' | 'email' | 'bvn' | 'select';
 
 export type BvnModificationField = {
   key: string;
   label: string;
   required: boolean;
   input: BvnModificationFieldInput;
+  /** Only for input: 'select'. */
+  options?: string[];
+  /** Only rendered/required when the named field currently holds `value` -
+   *  e.g. `bank_name` only makes sense once `enrollment_type` is "Bank".
+   *  The frontend is responsible for the show/hide; the backend schema
+   *  (routes/bvn-modification.routes.ts) makes the field itself optional
+   *  and validates the conditional requirement separately. */
+  dependsOn?: { key: string; value: string };
 };
 
 type BvnModificationTypeConfig = {
@@ -40,54 +59,79 @@ type BvnModificationTypeConfig = {
   fields: BvnModificationField[];
 };
 
+export const BVN_MODIFICATION_BANKS = [
+  'Micro Finance Bank',
+  'First Bank',
+  'Access Bank',
+  'Heritage Bank',
+  'Enterprise Bank',
+  'BOA Bank',
+  'LAPO Bank',
+  'NIBSS'
+] as const;
+
 // Every type starts with these three - the minimum an agent portal needs to
-// locate and verify the record before changing anything on it.
+// locate and verify the record before changing anything on it. "Bank Name"
+// only appears once "Bank" is chosen as the enrollment type (an agency
+// enrollment has no associated bank) - see `dependsOn` above.
 const identifyingFields: BvnModificationField[] = [
   { key: 'bvn', label: 'BVN Number', required: true, input: 'bvn' },
   { key: 'account_number', label: 'Account Number', required: true, input: 'text' },
-  { key: 'bank_name', label: 'Bank Name', required: true, input: 'text' }
+  { key: 'enrollment_type', label: 'Enrollment Type', required: true, input: 'select', options: ['Agency', 'Bank'] },
+  {
+    key: 'bank_name',
+    label: 'Bank Name',
+    required: true,
+    input: 'select',
+    options: [...BVN_MODIFICATION_BANKS],
+    dependsOn: { key: 'enrollment_type', value: 'Bank' }
+  }
+];
+
+const nameFields: BvnModificationField[] = [
+  { key: 'new_first_name', label: 'New First Name', required: true, input: 'text' },
+  { key: 'new_last_name', label: 'New Last Name', required: true, input: 'text' },
+  { key: 'new_middle_name', label: 'New Middle Name', required: false, input: 'text' }
+];
+const phoneFields: BvnModificationField[] = [
+  { key: 'new_phone_number', label: 'New Phone Number', required: true, input: 'phone' },
+  { key: 'second_phone_number', label: 'Second Phone Number', required: false, input: 'phone' }
+];
+const dobFields: BvnModificationField[] = [{ key: 'new_date_of_birth', label: 'New Date of Birth', required: true, input: 'date' }];
+const addressFields: BvnModificationField[] = [
+  { key: 'new_address', label: 'New Address', required: true, input: 'text' },
+  { key: 'new_state', label: 'State', required: true, input: 'text' },
+  { key: 'new_lga', label: 'L.G.A', required: true, input: 'text' }
 ];
 
 export const BVN_MODIFICATION_CONFIG: Record<BvnModificationType, BvnModificationTypeConfig> = {
-  update_phone: {
-    id: 'update_phone',
-    title: 'Update Phone Number',
-    price: 3500,
-    fields: [...identifyingFields, { key: 'new_phone_number', label: 'New Phone Number', required: true, input: 'phone' }]
+  update_name: { id: 'update_name', title: 'Update Name', price: 5000, fields: [...identifyingFields, ...nameFields] },
+  update_phone: { id: 'update_phone', title: 'Update Phone Number', price: 3500, fields: [...identifyingFields, ...phoneFields] },
+  update_dob: { id: 'update_dob', title: 'Update Date of Birth', price: 5000, fields: [...identifyingFields, ...dobFields] },
+  update_address: { id: 'update_address', title: 'Update Address', price: 3500, fields: [...identifyingFields, ...addressFields] },
+  update_name_dob: {
+    id: 'update_name_dob',
+    title: 'Update Name & DOB',
+    price: 8000,
+    fields: [...identifyingFields, ...nameFields, ...dobFields]
   },
-  update_name: {
-    id: 'update_name',
-    title: 'Update Name',
-    price: 5000,
-    fields: [
-      ...identifyingFields,
-      { key: 'new_first_name', label: 'New First Name', required: true, input: 'text' },
-      { key: 'new_last_name', label: 'New Last Name', required: true, input: 'text' },
-      { key: 'new_middle_name', label: 'New Middle Name', required: false, input: 'text' }
-    ]
+  update_name_phone: {
+    id: 'update_name_phone',
+    title: 'Update Name & Phone',
+    price: 7500,
+    fields: [...identifyingFields, ...nameFields, ...phoneFields]
   },
-  update_dob: {
-    id: 'update_dob',
-    title: 'Update Date of Birth',
-    price: 5000,
-    fields: [...identifyingFields, { key: 'new_date_of_birth', label: 'New Date of Birth', required: true, input: 'date' }]
+  update_name_address: {
+    id: 'update_name_address',
+    title: 'Update Name & Address',
+    price: 7500,
+    fields: [...identifyingFields, ...nameFields, ...addressFields]
   },
-  update_address: {
-    id: 'update_address',
-    title: 'Update Address',
-    price: 3500,
-    fields: [
-      ...identifyingFields,
-      { key: 'new_address', label: 'New Address', required: true, input: 'text' },
-      { key: 'new_state', label: 'State', required: true, input: 'text' },
-      { key: 'new_lga', label: 'L.G.A', required: true, input: 'text' }
-    ]
-  },
-  update_email: {
-    id: 'update_email',
-    title: 'Update Email Address',
-    price: 3000,
-    fields: [...identifyingFields, { key: 'new_email', label: 'New Email Address', required: true, input: 'email' }]
+  update_dob_phone: {
+    id: 'update_dob_phone',
+    title: 'Update DOB & Phone',
+    price: 7500,
+    fields: [...identifyingFields, ...dobFields, ...phoneFields]
   }
 };
 
@@ -315,4 +359,95 @@ export async function completeBvnModification(params: { transactionId: string })
 export function decryptBvnModificationPII(transaction: { metadata: unknown }) {
   const metadata = transaction.metadata as Record<string, unknown> | null;
   return openPII<Record<string, unknown> & { pdf_base64?: string }>(metadata?.pii);
+}
+
+// ── "Not sure what's wrong?" BVN/NIN match check ────────────────
+//
+// A customer often knows their BVN details are wrong somehow, but not
+// exactly which field - or that BOTH a name AND a date of birth need
+// fixing, when they only came in expecting one. Before picking a
+// modification type, they can instead have the platform pull both their
+// BVN slip and their NIN slip (each a REAL, separately-priced Techhub
+// purchase - reusing purchaseBvnSlip/purchaseNinByNin from
+// verification.service.ts exactly as the BVN Verification and NIN
+// Verification pages do, so this costs whatever those already cost, not a
+// separate fee) and compare the date of birth on each.
+//
+// Techhub doesn't document a single fixed key name for "date of birth"
+// across every endpoint response, so `extractDob` below tries a handful of
+// the field-name variants actually seen in the wild rather than assuming
+// one. If neither slip's data contains a recognisable DOB field at all, the
+// result is reported as "couldn't compare automatically" rather than a
+// silent false "match" - the customer is shown both raw records instead
+// and asked to compare by eye.
+
+const DOB_KEY_CANDIDATES = ['dob', 'date_of_birth', 'dateofbirth', 'birthdate', 'birth_date'];
+
+function extractDob(userData: Record<string, unknown> | undefined | null): string | null {
+  if (!userData) return null;
+  for (const [key, value] of Object.entries(userData)) {
+    if (typeof value !== 'string' || !value.trim()) continue;
+    const normalizedKey = key.toLowerCase().replace(/[\s_-]/g, '');
+    if (DOB_KEY_CANDIDATES.some((candidate) => normalizedKey === candidate.replace(/[\s_-]/g, ''))) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+/** Loose equality for two DOB strings that might be formatted differently
+ *  (e.g. "1994-05-01" vs "01-May-1994") - compares only the digit
+ *  characters, which is resilient to separator/month-name/order
+ *  differences without trying to fully parse every possible date format
+ *  Techhub's various endpoints might return. */
+function dobsLooselyMatch(a: string, b: string): boolean {
+  const digitsA = a.replace(/\D/g, '');
+  const digitsB = b.replace(/\D/g, '');
+  if (!digitsA || !digitsB) return false;
+  const sortedA = digitsA.split('').sort().join('');
+  const sortedB = digitsB.split('').sort().join('');
+  return digitsA === digitsB || sortedA === sortedB;
+}
+
+export type BvnNinMatchResult = {
+  bvn_reference: string;
+  nin_reference: string;
+  bvn_date_of_birth: string | null;
+  nin_date_of_birth: string | null;
+  comparable: boolean;
+  dob_matches: boolean | null;
+  suggested_types: BvnModificationType[];
+  bvn_user_data: Record<string, unknown> | undefined;
+  nin_user_data: Record<string, unknown> | undefined;
+};
+
+export async function verifyBvnNinMatch(params: { userId: string; bvn: string; nin: string; idempotencyKey?: string }): Promise<BvnNinMatchResult> {
+  // Cheapest tier of each, since this check only needs the underlying data
+  // fields (not a premium-format slip image) to compare a date of birth.
+  const [bvnResult, ninResult] = await Promise.all([
+    purchaseBvnSlip({ userId: params.userId, bvn: params.bvn, tier: 'standard', idempotencyKey: params.idempotencyKey ? `${params.idempotencyKey}:bvn` : undefined }),
+    purchaseNinByNin({ userId: params.userId, nin: params.nin, tier: 'regular', idempotencyKey: params.idempotencyKey ? `${params.idempotencyKey}:nin` : undefined })
+  ]);
+
+  if (!bvnResult.status) throw new ApiError(422, bvnResult.message || 'Could not retrieve the BVN record', 'BVN_LOOKUP_FAILED');
+  if (!ninResult.status) throw new ApiError(422, ninResult.message || 'Could not retrieve the NIN record', 'NIN_LOOKUP_FAILED');
+
+  const bvnDob = extractDob(bvnResult.userData);
+  const ninDob = extractDob(ninResult.userData);
+  const comparable = Boolean(bvnDob && ninDob);
+  const dobMatches = comparable ? dobsLooselyMatch(bvnDob as string, ninDob as string) : null;
+
+  const suggestedTypes: BvnModificationType[] = comparable && dobMatches === false ? ['update_dob', 'update_name_dob', 'update_dob_phone'] : [];
+
+  return {
+    bvn_reference: bvnResult.reference,
+    nin_reference: ninResult.reference,
+    bvn_date_of_birth: bvnDob,
+    nin_date_of_birth: ninDob,
+    comparable,
+    dob_matches: dobMatches,
+    suggested_types: suggestedTypes,
+    bvn_user_data: bvnResult.userData,
+    nin_user_data: ninResult.userData
+  };
 }

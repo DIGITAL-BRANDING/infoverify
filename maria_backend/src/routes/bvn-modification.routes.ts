@@ -9,7 +9,8 @@ import {
   type BvnModificationType,
   listBvnModificationHistory,
   listBvnModificationPrices,
-  submitBvnModificationRequest
+  submitBvnModificationRequest,
+  verifyBvnNinMatch
 } from '../services/bvn-modification.service.js';
 
 export const bvnModificationRoutes = Router();
@@ -36,19 +37,43 @@ function zodFor(field: BvnModificationField): ZodTypeAny {
     case 'date':
       schema = z.string().trim().min(1);
       break;
+    case 'select':
+      schema = field.options ? z.enum(field.options as [string, ...string[]]) : z.string().trim().min(1);
+      break;
     default:
       schema = z.string().trim().min(1).max(200);
   }
-  return field.required ? schema : schema.optional().or(z.literal(''));
+  // A `dependsOn` field (currently only `bank_name`, shown/required only
+  // when `enrollment_type` is "Bank") is always optional at the per-field
+  // level - the conditional "actually required when X" check happens once,
+  // object-wide, in schemaFor()'s `.superRefine()` below, since that's the
+  // only place multiple fields can be compared against each other.
+  return field.required && !field.dependsOn ? schema : schema.optional().or(z.literal(''));
 }
 
 /** Builds { bvn: z..., account_number: z..., ... } straight from the type's field config, so a new field only ever needs updating in bvn-modification.service.ts. */
 function schemaFor(type: BvnModificationType) {
+  const fields = BVN_MODIFICATION_CONFIG[type].fields;
   const shape: Record<string, ZodTypeAny> = {};
-  for (const field of BVN_MODIFICATION_CONFIG[type].fields) {
+  for (const field of fields) {
     shape[field.key] = zodFor(field);
   }
-  return z.object({ ...shape, ...pinField });
+  const base = z.object({ ...shape, ...pinField });
+
+  const conditional = fields.filter((f) => f.dependsOn && f.required);
+  if (conditional.length === 0) return base;
+
+  return base.superRefine((value, ctx) => {
+    const record = value as Record<string, unknown>;
+    for (const field of conditional) {
+      const dependsOn = field.dependsOn!;
+      if (record[dependsOn.key] !== dependsOn.value) continue;
+      const current = record[field.key];
+      if (typeof current !== 'string' || current.trim().length === 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [field.key], message: `${field.label} is required` });
+      }
+    }
+  });
 }
 
 // ── Config + prices ─────────────────────────────────────────────
@@ -61,7 +86,9 @@ bvnModificationRoutes.get('/types', (_req, res) => {
       key: field.key,
       label: field.label,
       required: field.required,
-      input: field.input
+      input: field.input,
+      options: field.options,
+      dependsOn: field.dependsOn
     }))
   }));
   res.json({ status: true, data });
@@ -79,6 +106,30 @@ bvnModificationRoutes.get('/history', async (req, res) => {
   const data = await listBvnModificationHistory({ userId: req.user!.id, type });
   res.set('Cache-Control', 'no-store');
   res.json({ status: true, data });
+});
+
+// ── "Not sure what's wrong?" BVN/NIN date-of-birth match check ─────
+// See the long comment above verifyBvnNinMatch() in
+// bvn-modification.service.ts for what this actually does and why it costs
+// real money (two real Techhub purchases, same price as BVN Verification +
+// NIN Verification individually - nothing extra).
+
+bvnModificationRoutes.post('/verify-match', async (req, res) => {
+  const body = z
+    .object({
+      bvn: z.string().trim().length(11, 'Must be exactly 11 digits'),
+      nin: z.string().trim().length(11, 'Must be exactly 11 digits'),
+      ...pinField
+    })
+    .parse(req.body);
+  await requirePinConfirmation(req.user!.id, body.pin);
+  const result = await verifyBvnNinMatch({
+    userId: req.user!.id,
+    bvn: body.bvn,
+    nin: body.nin,
+    idempotencyKey: idempotencyKeyFrom(req)
+  });
+  res.json({ status: true, data: result });
 });
 
 // ── Submit (one route per type, each validated against that type's own
