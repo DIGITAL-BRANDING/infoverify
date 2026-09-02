@@ -17,10 +17,9 @@ import { purchaseBvnSlip, purchaseNinByNin } from './verification.service.js';
  * either marks it complete (completeBvnModification()) or rejects it (the
  * existing generic "reverse" action, which refunds).
  *
- * Every type asks for the account number + enrollment type (agency or a
- * named bank) alongside the BVN itself, since that's the minimum an agent
- * portal needs to actually locate and verify the record before changing
- * anything on it.
+ * Every type asks for the enrollment type (agency or a named bank)
+ * alongside the BVN itself, since that's the minimum an agent portal needs
+ * to actually locate and verify the record before changing anything on it.
  */
 export const BVN_MODIFICATION_TYPES = [
   'update_name',
@@ -70,13 +69,12 @@ export const BVN_MODIFICATION_BANKS = [
   'NIBSS'
 ] as const;
 
-// Every type starts with these three - the minimum an agent portal needs to
+// Every type starts with these - the minimum an agent portal needs to
 // locate and verify the record before changing anything on it. "Bank Name"
 // only appears once "Bank" is chosen as the enrollment type (an agency
 // enrollment has no associated bank) - see `dependsOn` above.
 const identifyingFields: BvnModificationField[] = [
   { key: 'bvn', label: 'BVN Number', required: true, input: 'bvn' },
-  { key: 'account_number', label: 'Account Number', required: true, input: 'text' },
   { key: 'enrollment_type', label: 'Enrollment Type', required: true, input: 'select', options: ['Agency', 'Bank'] },
   {
     key: 'bank_name',
