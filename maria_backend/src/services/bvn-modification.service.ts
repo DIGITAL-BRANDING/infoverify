@@ -34,7 +34,7 @@ export const BVN_MODIFICATION_TYPES = [
 
 export type BvnModificationType = (typeof BVN_MODIFICATION_TYPES)[number];
 
-export type BvnModificationFieldInput = 'text' | 'date' | 'phone' | 'email' | 'bvn' | 'select';
+export type BvnModificationFieldInput = 'text' | 'date' | 'phone' | 'email' | 'bvn' | 'nin' | 'image' | 'select';
 
 export type BvnModificationField = {
   key: string;
@@ -70,11 +70,16 @@ export const BVN_MODIFICATION_BANKS = [
 ] as const;
 
 // Every type starts with these - the minimum an agent portal needs to
-// locate and verify the record before changing anything on it. "Bank Name"
-// only appears once "Bank" is chosen as the enrollment type (an agency
-// enrollment has no associated bank) - see `dependsOn` above.
+// locate and verify the record before changing anything on it, plus proof
+// of identity (the NIN and a photo of the National ID card) so an admin can
+// actually confirm the requester is who they say they are before re-keying
+// anything. "Bank Name" only appears once "Bank" is chosen as the
+// enrollment type (an agency enrollment has no associated bank) - see
+// `dependsOn` above.
 const identifyingFields: BvnModificationField[] = [
   { key: 'bvn', label: 'BVN Number', required: true, input: 'bvn' },
+  { key: 'nin', label: 'NIN Number', required: true, input: 'nin' },
+  { key: 'id_card_image', label: 'National ID Card (photo)', required: true, input: 'image' },
   { key: 'enrollment_type', label: 'Enrollment Type', required: true, input: 'select', options: ['Agency', 'Bank'] },
   {
     key: 'bank_name',
@@ -220,10 +225,33 @@ function renderBvnModificationPdf(params: {
     doc.moveDown(1);
 
     for (const field of params.fields) {
+      // The ID card photo gets embedded as an actual image further down,
+      // never printed as a wall of base64 text.
+      if (field.input === 'image') continue;
       const raw = params.values[field.key];
       const value = raw === undefined || raw === null || raw === '' ? '\u2014' : String(raw);
       doc.font('Helvetica-Bold').fontSize(10).text(`${field.label}: `, { continued: true });
       doc.font('Helvetica').text(value);
+    }
+
+    const imageField = params.fields.find((f) => f.input === 'image');
+    if (imageField) {
+      const raw = params.values[imageField.key];
+      if (typeof raw === 'string' && raw.startsWith('data:image/')) {
+        try {
+          const base64 = raw.slice(raw.indexOf(',') + 1);
+          const buffer = Buffer.from(base64, 'base64');
+          doc.moveDown(0.5);
+          doc.font('Helvetica-Bold').fontSize(10).text(`${imageField.label}:`);
+          doc.moveDown(0.3);
+          doc.image(buffer, { fit: [240, 240] });
+        } catch {
+          doc.font('Helvetica').fontSize(9).fillColor('#a00').text(`${imageField.label}: could not be embedded (invalid image data)`);
+        }
+      } else {
+        doc.font('Helvetica-Bold').fontSize(10).text(`${imageField.label}: `, { continued: true });
+        doc.font('Helvetica').text('\u2014');
+      }
     }
 
     doc.moveDown(1.5);

@@ -16,7 +16,7 @@ import {
   money,
 } from '../components/verification/shared';
 
-type FieldInput = 'text' | 'date' | 'phone' | 'email' | 'bvn' | 'select';
+type FieldInput = 'text' | 'date' | 'phone' | 'email' | 'bvn' | 'nin' | 'image' | 'select';
 type Field = { key: string; label: string; required: boolean; input: FieldInput; options?: string[]; dependsOn?: { key: string; value: string } };
 type TypeConfig = { id: string; title: string; fields: Field[] };
 type PriceRow = { type: string; title: string; unitPrice: number; isActive: boolean };
@@ -28,6 +28,17 @@ type MatchResult = {
   dob_matches: boolean | null;
   suggested_types: string[];
 };
+
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4MB raw file - keeps the base64'd body comfortably under the backend's 8mb JSON limit
+
+function readImageAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error('Could not read file'));
+    reader.readAsDataURL(file);
+  });
+}
 
 const TYPE_ORDER = [
   'update_name',
@@ -51,6 +62,7 @@ export default function BvnModificationPage() {
   const [prices, setPrices] = useState<Record<string, number>>({});
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [imageErrors, setImageErrors] = useState<Record<string, string>>({});
   const [showPin, setShowPin] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -85,9 +97,29 @@ export default function BvnModificationPage() {
   function pickType(id: string) {
     setSelectedType(id);
     setValues({});
+    setImageErrors({});
     setMessage('');
     setReference('');
     setStage('form');
+  }
+
+  async function handleImageSelect(fieldKey: string, file: File | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setImageErrors((e) => ({ ...e, [fieldKey]: 'Please choose an image file (PNG, JPEG, or WEBP).' }));
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setImageErrors((e) => ({ ...e, [fieldKey]: 'That photo is too large - please use one under 4MB.' }));
+      return;
+    }
+    try {
+      const dataUrl = await readImageAsDataUrl(file);
+      setValues((v) => ({ ...v, [fieldKey]: dataUrl }));
+      setImageErrors((e) => ({ ...e, [fieldKey]: '' }));
+    } catch {
+      setImageErrors((e) => ({ ...e, [fieldKey]: 'Could not read that file - please try again.' }));
+    }
   }
 
   async function loadHistory(type: string) {
@@ -132,6 +164,15 @@ export default function BvnModificationPage() {
 
   function prepare(event: FormEvent) {
     event.preventDefault();
+    if (selected) {
+      const missingImage = selected.fields.find(
+        (f) => f.input === 'image' && f.required && (!f.dependsOn || values[f.dependsOn.key] === f.dependsOn.value) && !values[f.key]
+      );
+      if (missingImage) {
+        setMessage(`Please attach a photo for "${missingImage.label}" before continuing.`);
+        return;
+      }
+    }
     setShowPin(true);
   }
 
@@ -328,12 +369,52 @@ export default function BvnModificationPage() {
                             </option>
                           ))}
                         </select>
+                      ) : field.input === 'image' ? (
+                        <div className="mt-1">
+                          {values[field.key] ? (
+                            <div className="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50 p-2">
+                              <img src={values[field.key]} alt={field.label} className="h-16 w-16 rounded-lg object-cover" />
+                              <div className="flex-1">
+                                <p className="font-body text-xs text-[#0b2f73]">Photo selected</p>
+                                <label className="cursor-pointer font-body text-xs font-semibold text-[#0b2f73] underline">
+                                  Change photo
+                                  <input
+                                    type="file"
+                                    accept="image/png,image/jpeg,image/webp"
+                                    className="hidden"
+                                    onChange={(e) => void handleImageSelect(field.key, e.target.files?.[0])}
+                                  />
+                                </label>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setValues((v) => ({ ...v, [field.key]: '' }))}
+                                className="font-body text-xs font-semibold text-rose-600"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ) : (
+                            <label className={`flex cursor-pointer items-center justify-center rounded-xl border border-dashed p-4 text-center ${FORM_INPUT_CLASSES}`}>
+                              <span className="font-body text-xs text-[#0b2f73]/70">Tap to take or upload a photo of your National ID card</span>
+                              <input
+                                required={field.required}
+                                type="file"
+                                accept="image/png,image/jpeg,image/webp"
+                                capture="environment"
+                                className="hidden"
+                                onChange={(e) => void handleImageSelect(field.key, e.target.files?.[0])}
+                              />
+                            </label>
+                          )}
+                          {imageErrors[field.key] && <p className="mt-1 font-body text-xs text-rose-600">{imageErrors[field.key]}</p>}
+                        </div>
                       ) : (
                         <input
                           required={field.required}
-                          type={field.input === 'date' ? 'date' : field.input === 'email' ? 'email' : field.input === 'phone' || field.input === 'bvn' ? 'tel' : 'text'}
-                          inputMode={field.input === 'phone' || field.input === 'bvn' ? 'numeric' : undefined}
-                          maxLength={field.input === 'phone' || field.input === 'bvn' ? 11 : undefined}
+                          type={field.input === 'date' ? 'date' : field.input === 'email' ? 'email' : field.input === 'phone' || field.input === 'bvn' || field.input === 'nin' ? 'tel' : 'text'}
+                          inputMode={field.input === 'phone' || field.input === 'bvn' || field.input === 'nin' ? 'numeric' : undefined}
+                          maxLength={field.input === 'phone' || field.input === 'bvn' || field.input === 'nin' ? 11 : undefined}
                           className={`mt-1 ${FORM_INPUT_CLASSES}`}
                           value={values[field.key] ?? ''}
                           onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}

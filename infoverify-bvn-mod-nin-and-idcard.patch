@@ -1,0 +1,285 @@
+From 50f043b64b543bc47f30ae840061f5c206e24795 Mon Sep 17 00:00:00 2001
+From: Claude <dev@infoverify.local>
+Date: Wed, 2 Sep 2026 21:17:10 +0000
+Subject: [PATCH] BVN Modification: require NIN number + a National ID card
+ photo on every type
+
+- Every one of the 8 modification types now also asks for NIN Number
+  (new 'nin' input kind, same 11-digit validation as 'bvn') and a photo
+  of the National ID card (new 'image' input kind) alongside the
+  existing BVN/Enrollment Type/Bank Name fields - so an admin has proof
+  of identity before re-keying anything.
+- Image is sent as a data URL string (consistent with how PDFs are
+  already stored inline via sealPII elsewhere in this file), validated
+  server-side (must be a png/jpeg/webp data URL, capped at 7MB base64 -
+  comfortably under express.json()'s existing 8mb limit) and embedded
+  directly into the generated submission PDF via pdfkit's doc.image(),
+  not printed as raw base64 text.
+- Frontend: file-picker UI with client-side type/size checks (image
+  files only, 4MB raw cap), a thumbnail preview, and a guard in
+  prepare() that blocks opening the PIN dialog if a required photo is
+  missing (a hidden native file input's own 'required' validation
+  doesn't surface well once visually replaced by a custom label).
+
+Verified: all 8 existing bvn-modification.service tests still pass
+unchanged (vitest run, mocked Prisma - actually executed this time, not
+just hand-reviewed). Frontend tsc + vite build both clean. Backend tsc
+shows pre-existing stale-Prisma-client errors identical to
+nin-modification.service.ts's (untouched, long-existing file) - not
+something introduced by this change; the new nin/image-specific code
+adds zero new errors beyond that baseline.
+---
+ .../src/routes/bvn-modification.routes.ts     | 16 +++-
+ .../src/services/bvn-modification.service.ts  | 36 +++++++-
+ web/src/pages/BvnModificationPage.tsx         | 89 ++++++++++++++++++-
+ 3 files changed, 132 insertions(+), 9 deletions(-)
+
+diff --git a/maria_backend/src/routes/bvn-modification.routes.ts b/maria_backend/src/routes/bvn-modification.routes.ts
+index 3483aa1..b8da9ab 100644
+--- a/maria_backend/src/routes/bvn-modification.routes.ts
++++ b/maria_backend/src/routes/bvn-modification.routes.ts
+@@ -26,7 +26,8 @@ function zodFor(field: BvnModificationField): ZodTypeAny {
+   let schema: ZodTypeAny;
+   switch (field.input) {
+     case 'bvn':
+-      schema = z.string().trim().length(11, 'Must be exactly 11 digits');
++    case 'nin':
++      schema = z.string().trim().length(11, 'Must be exactly 11 digits').regex(/^\d{11}$/, 'Must be 11 digits');
+       break;
+     case 'phone':
+       schema = z.string().trim().length(11, 'Must be exactly 11 digits').regex(/^0\d{10}$/, 'Must start with 0');
+@@ -37,6 +38,19 @@ function zodFor(field: BvnModificationField): ZodTypeAny {
+     case 'date':
+       schema = z.string().trim().min(1);
+       break;
++    case 'image':
++      // A data URL string (e.g. "data:image/jpeg;base64,...") - the
++      // frontend reads the selected file client-side and sends it this way,
++      // same as everywhere else in this codebase that stores an image/PDF
++      // inline rather than to separate file storage. Capped well under
++      // express.json()'s 8mb body limit (see app.ts) to leave room for the
++      // rest of the request.
++      schema = z
++        .string()
++        .trim()
++        .regex(/^data:image\/(png|jpe?g|webp);base64,/, 'Must be a photo (PNG, JPEG, or WEBP)')
++        .max(7_000_000, 'Image is too large - please use a smaller photo');
++      break;
+     case 'select':
+       schema = field.options ? z.enum(field.options as [string, ...string[]]) : z.string().trim().min(1);
+       break;
+diff --git a/maria_backend/src/services/bvn-modification.service.ts b/maria_backend/src/services/bvn-modification.service.ts
+index 24c8706..babfd18 100644
+--- a/maria_backend/src/services/bvn-modification.service.ts
++++ b/maria_backend/src/services/bvn-modification.service.ts
+@@ -34,7 +34,7 @@ export const BVN_MODIFICATION_TYPES = [
+ 
+ export type BvnModificationType = (typeof BVN_MODIFICATION_TYPES)[number];
+ 
+-export type BvnModificationFieldInput = 'text' | 'date' | 'phone' | 'email' | 'bvn' | 'select';
++export type BvnModificationFieldInput = 'text' | 'date' | 'phone' | 'email' | 'bvn' | 'nin' | 'image' | 'select';
+ 
+ export type BvnModificationField = {
+   key: string;
+@@ -70,11 +70,16 @@ export const BVN_MODIFICATION_BANKS = [
+ ] as const;
+ 
+ // Every type starts with these - the minimum an agent portal needs to
+-// locate and verify the record before changing anything on it. "Bank Name"
+-// only appears once "Bank" is chosen as the enrollment type (an agency
+-// enrollment has no associated bank) - see `dependsOn` above.
++// locate and verify the record before changing anything on it, plus proof
++// of identity (the NIN and a photo of the National ID card) so an admin can
++// actually confirm the requester is who they say they are before re-keying
++// anything. "Bank Name" only appears once "Bank" is chosen as the
++// enrollment type (an agency enrollment has no associated bank) - see
++// `dependsOn` above.
+ const identifyingFields: BvnModificationField[] = [
+   { key: 'bvn', label: 'BVN Number', required: true, input: 'bvn' },
++  { key: 'nin', label: 'NIN Number', required: true, input: 'nin' },
++  { key: 'id_card_image', label: 'National ID Card (photo)', required: true, input: 'image' },
+   { key: 'enrollment_type', label: 'Enrollment Type', required: true, input: 'select', options: ['Agency', 'Bank'] },
+   {
+     key: 'bank_name',
+@@ -220,12 +225,35 @@ function renderBvnModificationPdf(params: {
+     doc.moveDown(1);
+ 
+     for (const field of params.fields) {
++      // The ID card photo gets embedded as an actual image further down,
++      // never printed as a wall of base64 text.
++      if (field.input === 'image') continue;
+       const raw = params.values[field.key];
+       const value = raw === undefined || raw === null || raw === '' ? '\u2014' : String(raw);
+       doc.font('Helvetica-Bold').fontSize(10).text(`${field.label}: `, { continued: true });
+       doc.font('Helvetica').text(value);
+     }
+ 
++    const imageField = params.fields.find((f) => f.input === 'image');
++    if (imageField) {
++      const raw = params.values[imageField.key];
++      if (typeof raw === 'string' && raw.startsWith('data:image/')) {
++        try {
++          const base64 = raw.slice(raw.indexOf(',') + 1);
++          const buffer = Buffer.from(base64, 'base64');
++          doc.moveDown(0.5);
++          doc.font('Helvetica-Bold').fontSize(10).text(`${imageField.label}:`);
++          doc.moveDown(0.3);
++          doc.image(buffer, { fit: [240, 240] });
++        } catch {
++          doc.font('Helvetica').fontSize(9).fillColor('#a00').text(`${imageField.label}: could not be embedded (invalid image data)`);
++        }
++      } else {
++        doc.font('Helvetica-Bold').fontSize(10).text(`${imageField.label}: `, { continued: true });
++        doc.font('Helvetica').text('\u2014');
++      }
++    }
++
+     doc.moveDown(1.5);
+     doc
+       .fontSize(8)
+diff --git a/web/src/pages/BvnModificationPage.tsx b/web/src/pages/BvnModificationPage.tsx
+index 28f3385..d472ccb 100644
+--- a/web/src/pages/BvnModificationPage.tsx
++++ b/web/src/pages/BvnModificationPage.tsx
+@@ -16,7 +16,7 @@ import {
+   money,
+ } from '../components/verification/shared';
+ 
+-type FieldInput = 'text' | 'date' | 'phone' | 'email' | 'bvn' | 'select';
++type FieldInput = 'text' | 'date' | 'phone' | 'email' | 'bvn' | 'nin' | 'image' | 'select';
+ type Field = { key: string; label: string; required: boolean; input: FieldInput; options?: string[]; dependsOn?: { key: string; value: string } };
+ type TypeConfig = { id: string; title: string; fields: Field[] };
+ type PriceRow = { type: string; title: string; unitPrice: number; isActive: boolean };
+@@ -29,6 +29,17 @@ type MatchResult = {
+   suggested_types: string[];
+ };
+ 
++const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4MB raw file - keeps the base64'd body comfortably under the backend's 8mb JSON limit
++
++function readImageAsDataUrl(file: File): Promise<string> {
++  return new Promise((resolve, reject) => {
++    const reader = new FileReader();
++    reader.onload = () => resolve(reader.result as string);
++    reader.onerror = () => reject(reader.error ?? new Error('Could not read file'));
++    reader.readAsDataURL(file);
++  });
++}
++
+ const TYPE_ORDER = [
+   'update_name',
+   'update_phone',
+@@ -51,6 +62,7 @@ export default function BvnModificationPage() {
+   const [prices, setPrices] = useState<Record<string, number>>({});
+   const [selectedType, setSelectedType] = useState<string | null>(null);
+   const [values, setValues] = useState<Record<string, string>>({});
++  const [imageErrors, setImageErrors] = useState<Record<string, string>>({});
+   const [showPin, setShowPin] = useState(false);
+   const [busy, setBusy] = useState(false);
+   const [message, setMessage] = useState('');
+@@ -85,11 +97,31 @@ export default function BvnModificationPage() {
+   function pickType(id: string) {
+     setSelectedType(id);
+     setValues({});
++    setImageErrors({});
+     setMessage('');
+     setReference('');
+     setStage('form');
+   }
+ 
++  async function handleImageSelect(fieldKey: string, file: File | undefined) {
++    if (!file) return;
++    if (!file.type.startsWith('image/')) {
++      setImageErrors((e) => ({ ...e, [fieldKey]: 'Please choose an image file (PNG, JPEG, or WEBP).' }));
++      return;
++    }
++    if (file.size > MAX_IMAGE_BYTES) {
++      setImageErrors((e) => ({ ...e, [fieldKey]: 'That photo is too large - please use one under 4MB.' }));
++      return;
++    }
++    try {
++      const dataUrl = await readImageAsDataUrl(file);
++      setValues((v) => ({ ...v, [fieldKey]: dataUrl }));
++      setImageErrors((e) => ({ ...e, [fieldKey]: '' }));
++    } catch {
++      setImageErrors((e) => ({ ...e, [fieldKey]: 'Could not read that file - please try again.' }));
++    }
++  }
++
+   async function loadHistory(type: string) {
+     setLoadingHistory(true);
+     try {
+@@ -132,6 +164,15 @@ export default function BvnModificationPage() {
+ 
+   function prepare(event: FormEvent) {
+     event.preventDefault();
++    if (selected) {
++      const missingImage = selected.fields.find(
++        (f) => f.input === 'image' && f.required && (!f.dependsOn || values[f.dependsOn.key] === f.dependsOn.value) && !values[f.key]
++      );
++      if (missingImage) {
++        setMessage(`Please attach a photo for "${missingImage.label}" before continuing.`);
++        return;
++      }
++    }
+     setShowPin(true);
+   }
+ 
+@@ -328,12 +369,52 @@ export default function BvnModificationPage() {
+                             </option>
+                           ))}
+                         </select>
++                      ) : field.input === 'image' ? (
++                        <div className="mt-1">
++                          {values[field.key] ? (
++                            <div className="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50 p-2">
++                              <img src={values[field.key]} alt={field.label} className="h-16 w-16 rounded-lg object-cover" />
++                              <div className="flex-1">
++                                <p className="font-body text-xs text-[#0b2f73]">Photo selected</p>
++                                <label className="cursor-pointer font-body text-xs font-semibold text-[#0b2f73] underline">
++                                  Change photo
++                                  <input
++                                    type="file"
++                                    accept="image/png,image/jpeg,image/webp"
++                                    className="hidden"
++                                    onChange={(e) => void handleImageSelect(field.key, e.target.files?.[0])}
++                                  />
++                                </label>
++                              </div>
++                              <button
++                                type="button"
++                                onClick={() => setValues((v) => ({ ...v, [field.key]: '' }))}
++                                className="font-body text-xs font-semibold text-rose-600"
++                              >
++                                Remove
++                              </button>
++                            </div>
++                          ) : (
++                            <label className={`flex cursor-pointer items-center justify-center rounded-xl border border-dashed p-4 text-center ${FORM_INPUT_CLASSES}`}>
++                              <span className="font-body text-xs text-[#0b2f73]/70">Tap to take or upload a photo of your National ID card</span>
++                              <input
++                                required={field.required}
++                                type="file"
++                                accept="image/png,image/jpeg,image/webp"
++                                capture="environment"
++                                className="hidden"
++                                onChange={(e) => void handleImageSelect(field.key, e.target.files?.[0])}
++                              />
++                            </label>
++                          )}
++                          {imageErrors[field.key] && <p className="mt-1 font-body text-xs text-rose-600">{imageErrors[field.key]}</p>}
++                        </div>
+                       ) : (
+                         <input
+                           required={field.required}
+-                          type={field.input === 'date' ? 'date' : field.input === 'email' ? 'email' : field.input === 'phone' || field.input === 'bvn' ? 'tel' : 'text'}
+-                          inputMode={field.input === 'phone' || field.input === 'bvn' ? 'numeric' : undefined}
+-                          maxLength={field.input === 'phone' || field.input === 'bvn' ? 11 : undefined}
++                          type={field.input === 'date' ? 'date' : field.input === 'email' ? 'email' : field.input === 'phone' || field.input === 'bvn' || field.input === 'nin' ? 'tel' : 'text'}
++                          inputMode={field.input === 'phone' || field.input === 'bvn' || field.input === 'nin' ? 'numeric' : undefined}
++                          maxLength={field.input === 'phone' || field.input === 'bvn' || field.input === 'nin' ? 11 : undefined}
+                           className={`mt-1 ${FORM_INPUT_CLASSES}`}
+                           value={values[field.key] ?? ''}
+                           onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
+-- 
+2.43.0
+

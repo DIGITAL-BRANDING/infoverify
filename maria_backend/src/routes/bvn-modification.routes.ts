@@ -26,7 +26,8 @@ function zodFor(field: BvnModificationField): ZodTypeAny {
   let schema: ZodTypeAny;
   switch (field.input) {
     case 'bvn':
-      schema = z.string().trim().length(11, 'Must be exactly 11 digits');
+    case 'nin':
+      schema = z.string().trim().length(11, 'Must be exactly 11 digits').regex(/^\d{11}$/, 'Must be 11 digits');
       break;
     case 'phone':
       schema = z.string().trim().length(11, 'Must be exactly 11 digits').regex(/^0\d{10}$/, 'Must start with 0');
@@ -36,6 +37,19 @@ function zodFor(field: BvnModificationField): ZodTypeAny {
       break;
     case 'date':
       schema = z.string().trim().min(1);
+      break;
+    case 'image':
+      // A data URL string (e.g. "data:image/jpeg;base64,...") - the
+      // frontend reads the selected file client-side and sends it this way,
+      // same as everywhere else in this codebase that stores an image/PDF
+      // inline rather than to separate file storage. Capped well under
+      // express.json()'s 8mb body limit (see app.ts) to leave room for the
+      // rest of the request.
+      schema = z
+        .string()
+        .trim()
+        .regex(/^data:image\/(png|jpe?g|webp);base64,/, 'Must be a photo (PNG, JPEG, or WEBP)')
+        .max(7_000_000, 'Image is too large - please use a smaller photo');
       break;
     case 'select':
       schema = field.options ? z.enum(field.options as [string, ...string[]]) : z.string().trim().min(1);

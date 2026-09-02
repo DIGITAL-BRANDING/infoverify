@@ -202,6 +202,15 @@ export const transactionResource: ResourceWithOptions = {
       downloadModificationPdf: {
         actionType: 'record',
         icon: 'Download',
+        // AdminJS's default assumption for a 'record' action is that it
+        // renders a UI component (e.g. a confirmation dialog or form) -
+        // without `component: false` it throws "You have to implement
+        // action component for your Action" the moment it's clicked, since
+        // this action does neither: it just runs handler() and follows the
+        // redirectUrl it returns. Same reasoning applies to every other
+        // pure-redirect action below (downloadBvnModificationPdf,
+        // downloadBvnLicensePdf, manageCacRequest).
+        component: false,
         isAccessible: ({ currentAdmin, record }) => {
           const admin = currentAdmin as unknown as AdminSessionUser | undefined;
           return admin?.role === 'SUPER_ADMIN' && record?.params?.type === 'NIN_MODIFICATION';
@@ -265,6 +274,7 @@ export const transactionResource: ResourceWithOptions = {
       downloadBvnModificationPdf: {
         actionType: 'record',
         icon: 'Download',
+        component: false,
         isAccessible: ({ currentAdmin, record }) => {
           const admin = currentAdmin as unknown as AdminSessionUser | undefined;
           return admin?.role === 'SUPER_ADMIN' && record?.params?.type === 'BVN_MODIFICATION';
@@ -296,7 +306,7 @@ export const transactionResource: ResourceWithOptions = {
         }
       },
       downloadBvnLicensePdf: {
-        actionType: 'record', icon: 'Download',
+        actionType: 'record', icon: 'Download', component: false,
         isAccessible: ({ currentAdmin, record }) => {
           const admin = currentAdmin as unknown as AdminSessionUser | undefined;
           return admin?.role === 'SUPER_ADMIN' && record?.params?.type === 'BVN_LICENSE_ONBOARDING';
@@ -313,7 +323,7 @@ export const transactionResource: ResourceWithOptions = {
       // not a single confirm-guard click, hence the redirect to a dedicated
       // page instead of an inline handler.
       manageCacRequest: {
-        actionType: 'record', icon: 'Edit',
+        actionType: 'record', icon: 'Edit', component: false,
         isAccessible: ({ currentAdmin, record }) => {
           const admin = currentAdmin as unknown as AdminSessionUser | undefined;
           return !!admin && admin.role !== 'SUPPORT' && record?.params?.type === 'CAC_SERVICE_REQUEST';
