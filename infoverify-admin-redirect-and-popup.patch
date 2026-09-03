@@ -1,0 +1,410 @@
+From 86235242238963d7aeacc06cfadee039db35cfee Mon Sep 17 00:00:00 2001
+From: Claude <dev@infoverify.local>
+Date: Thu, 3 Sep 2026 11:49:08 +0000
+Subject: [PATCH] Fix admin action redirect bug (window.location instead of
+ AdminJS SPA navigate); add unresolved-requests popup on admin dashboard login
+
+---
+ maria_backend/src/admin/component-loader.ts   |  4 +
+ .../src/admin/components/dashboard.tsx        | 92 ++++++++++++++++++-
+ .../admin/components/redirect-to-manage.tsx   | 63 +++++++++++++
+ maria_backend/src/admin/pending-summary.ts    | 60 ++++++++++++
+ .../admin/resources/transaction.resource.ts   | 44 ++++-----
+ maria_backend/src/admin/setup.ts              |  2 +
+ 6 files changed, 241 insertions(+), 24 deletions(-)
+ create mode 100644 maria_backend/src/admin/components/redirect-to-manage.tsx
+ create mode 100644 maria_backend/src/admin/pending-summary.ts
+
+diff --git a/maria_backend/src/admin/component-loader.ts b/maria_backend/src/admin/component-loader.ts
+index 1a7075f..80d6801 100644
+--- a/maria_backend/src/admin/component-loader.ts
++++ b/maria_backend/src/admin/component-loader.ts
+@@ -8,5 +8,9 @@ export const Components = {
+   Dashboard: componentLoader.add(
+     'Dashboard',
+     process.env.NODE_ENV === 'production' ? './components/dashboard.js' : './components/dashboard.tsx'
++  ),
++  RedirectToManage: componentLoader.add(
++    'RedirectToManage',
++    process.env.NODE_ENV === 'production' ? './components/redirect-to-manage.js' : './components/redirect-to-manage.tsx'
+   )
+ };
+diff --git a/maria_backend/src/admin/components/dashboard.tsx b/maria_backend/src/admin/components/dashboard.tsx
+index 8ef4c82..f4a2348 100644
+--- a/maria_backend/src/admin/components/dashboard.tsx
++++ b/maria_backend/src/admin/components/dashboard.tsx
+@@ -1,8 +1,11 @@
+-import React from 'react';
+-import { Box, H2, H4, Icon, Text } from '@adminjs/design-system';
++import React, { useEffect, useState } from 'react';
++import { Box, Button, H2, H4, Icon, Text } from '@adminjs/design-system';
+ 
+ const ADMIN_ROOT_PATH = '/admin';
+ 
++type PendingSummaryRow = { type: string; label: string; pending: number; new_last_24h: number };
++type PendingSummary = { total_pending: number; total_new_last_24h: number; by_type: PendingSummaryRow[] };
++
+ type QuickLink = {
+   label: string;
+   description: string;
+@@ -127,8 +130,93 @@ const quickLinks: QuickLink[] = [
+   { label: 'Audit Log', description: 'Admin activity history', resourceId: 'AdminAuditLog', icon: 'FileText' }
+ ];
+ 
++// Shown once per dashboard visit (mount) so an admin logging in - or just
++// navigating back to the dashboard - immediately sees what's backed up
++// across every manually-processed request type (CAC, BVN License, BVN
++// Modification, NIN Modification), instead of having to click through each
++// "Requests" tile individually to discover a queue has built up. Powered by
++// GET /api/admin/pending-summary (routes/admin-api.routes.ts).
++function PendingRequestsPopup() {
++  const [summary, setSummary] = useState<PendingSummary | null>(null);
++  const [dismissed, setDismissed] = useState(false);
++  const [loadFailed, setLoadFailed] = useState(false);
++
++  useEffect(() => {
++    fetch(`${ADMIN_ROOT_PATH}/pending-summary`, { credentials: 'include' })
++      .then((res) => {
++        if (!res.ok) throw new Error(`HTTP ${res.status}`);
++        return res.json();
++      })
++      .then((body) => setSummary(body.data as PendingSummary))
++      .catch(() => setLoadFailed(true));
++  }, []);
++
++  if (dismissed || loadFailed || !summary || summary.total_pending === 0) return null;
++
++  return (
++    <Box
++      style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.55)', zIndex: 1000 }}
++      display="flex"
++      alignItems="center"
++      justifyContent="center"
++      onClick={() => setDismissed(true)}
++    >
++      <Box
++        variant="white"
++        boxShadow="card"
++        p="xl"
++        style={{ width: 'min(480px, 92vw)', borderRadius: 14 }}
++        onClick={(e: React.MouseEvent) => e.stopPropagation()}
++      >
++        <Box display="flex" alignItems="center" mb="default">
++          <Icon icon="AlertTriangle" color="#b45309" bg="rgba(180, 83, 9, 0.12)" rounded size={22} p="default" mr="default" />
++          <H4 m={0}>Requests waiting on you</H4>
++        </Box>
++        <Text mb="lg" color="grey60">
++          {summary.total_pending} request{summary.total_pending === 1 ? '' : 's'} still unresolved
++          {summary.total_new_last_24h > 0 ? `, ${summary.total_new_last_24h} new in the last 24 hours` : ''}.
++        </Text>
++
++        <Box mb="lg">
++          {summary.by_type
++            .filter((row) => row.pending > 0)
++            .map((row) => (
++              <Box
++                key={row.type}
++                display="flex"
++                justifyContent="space-between"
++                alignItems="center"
++                py="default"
++                style={{ borderBottom: '1px solid #eef2f7' }}
++              >
++                <Box>
++                  <Text fontWeight="bold">{row.label}</Text>
++                  {row.new_last_24h > 0 && (
++                    <Text fontSize="xs" color="#b45309">
++                      {row.new_last_24h} new today
++                    </Text>
++                  )}
++                </Box>
++                <a href={`${ADMIN_ROOT_PATH}/resources/Transaction?filters.type=${row.type}&filters.status=PENDING`} style={{ textDecoration: 'none' }}>
++                  <Button size="sm" variant="text">
++                    {row.pending} pending →
++                  </Button>
++                </a>
++              </Box>
++            ))}
++        </Box>
++
++        <Button onClick={() => setDismissed(true)} style={{ width: '100%', justifyContent: 'center' }}>
++          Got it
++        </Button>
++      </Box>
++    </Box>
++  );
++}
++
+ const Dashboard: React.FC = () => (
+   <Box>
++    <PendingRequestsPopup />
+     <Box
+       position="relative"
+       overflow="hidden"
+diff --git a/maria_backend/src/admin/components/redirect-to-manage.tsx b/maria_backend/src/admin/components/redirect-to-manage.tsx
+new file mode 100644
+index 0000000..8cda659
+--- /dev/null
++++ b/maria_backend/src/admin/components/redirect-to-manage.tsx
+@@ -0,0 +1,63 @@
++import React, { useEffect } from 'react';
++import { Box, Loader, Text } from '@adminjs/design-system';
++
++/**
++ * Fixes a real bug: an AdminJS record action's `redirectUrl` (returned from
++ * its `handler`) is followed with React Router's client-side `navigate()`
++ * (see node_modules/adminjs/lib/frontend/hooks/use-action/
++ * use-action-response-handler.js) - i.e. it only works for paths AdminJS's
++ * OWN React Router knows about (/admin/resources/..., /admin/pages/...).
++ * Our custom server-rendered pages (/admin/cac/:id/manage,
++ * /admin/nin-modification/:id/pdf, etc - plain Express routes, not part of
++ * the AdminJS SPA at all) don't exist in that router, so `navigate()`
++ * silently falls through to AdminJS's own catch-all and lands on the
++ * dashboard - which is exactly the "Manage" button redirecting to the
++ * dashboard" bug this fixes.
++ *
++ * The fix: give the action THIS component (instead of `component: false` +
++ * a `redirectUrl`), and have it perform a real `window.location.href`
++ * assignment on mount. That's a genuine full-page browser navigation, which
++ * (unlike React Router's navigate()) happily leaves the SPA and loads
++ * whatever the target URL actually serves - the same way the plain
++ * `<a href="...">` dashboard tiles in components/dashboard.tsx already
++ * work for the other custom pages (Company Wallet, Bulk Pricing, etc), just
++ * triggered from an action button instead of a dashboard tile.
++ */
++type RedirectToManageProps = {
++  record?: { params?: Record<string, unknown> };
++};
++
++const TARGET_PATH_BY_TYPE: Record<string, (id: string) => string> = {
++  CAC_SERVICE_REQUEST: (id) => `/admin/cac/${id}/manage`,
++  NIN_MODIFICATION: (id) => `/admin/nin-modification/${id}/pdf`,
++  BVN_LICENSE_ONBOARDING: (id) => `/admin/bvn-license/${id}/pdf`,
++  BVN_MODIFICATION: (id) => `/admin/bvn-modification/${id}/pdf`
++};
++
++const RedirectToManage: React.FC<RedirectToManageProps> = ({ record }) => {
++  const type = record?.params?.type as string | undefined;
++  const id = record?.params?.id as string | undefined;
++  const buildPath = type ? TARGET_PATH_BY_TYPE[type] : undefined;
++  const targetUrl = buildPath && id ? buildPath(id) : null;
++
++  useEffect(() => {
++    if (targetUrl) {
++      window.location.href = targetUrl;
++    }
++  }, [targetUrl]);
++
++  return (
++    <Box variant="white" p="xxl" textAlign="center">
++      {targetUrl ? (
++        <>
++          <Loader />
++          <Text mt="lg">Opening…</Text>
++        </>
++      ) : (
++        <Text color="red">Could not work out which page to open for this record (missing or unrecognised type).</Text>
++      )}
++    </Box>
++  );
++};
++
++export default RedirectToManage;
+diff --git a/maria_backend/src/admin/pending-summary.ts b/maria_backend/src/admin/pending-summary.ts
+new file mode 100644
+index 0000000..265f70e
+--- /dev/null
++++ b/maria_backend/src/admin/pending-summary.ts
+@@ -0,0 +1,60 @@
++import type { Request, Router } from 'express';
++import { TransactionStatus, TransactionType } from '@prisma/client';
++import { prisma } from '../lib/prisma.js';
++import type { AdminSessionUser } from './auth.js';
++
++declare module 'express-session' {
++  interface SessionData {
++    adminUser?: AdminSessionUser;
++  }
++}
++
++/**
++ * Powers the "unresolved requests" popup shown on the admin dashboard
++ * (components/dashboard.tsx) - a quick summary of every manually-processed
++ * request type (CAC, BVN License, BVN Modification, NIN Modification)
++ * still sitting PENDING, plus how many of each arrived in the last 24
++ * hours, so an admin logging in immediately sees what's backed up without
++ * clicking through every "Requests" tile individually.
++ *
++ * This is registered on the SAME router AdminJS itself uses (see
++ * setup.ts), which shares AdminJS's own session/cookie
++ * (`imam_admin_sid`) - NOT routes/admin-api.routes.ts, which requires a
++ * customer-app Bearer token that a request originating from inside the
++ * AdminJS panel's own React components never has. Same pattern as
++ * admin/cac.ts's manage page.
++ */
++const PENDING_SUMMARY_TYPES: { type: TransactionType; label: string }[] = [
++  { type: TransactionType.CAC_SERVICE_REQUEST, label: 'CAC Registration' },
++  { type: TransactionType.BVN_LICENSE_ONBOARDING, label: 'BVN License Enrollment' },
++  { type: TransactionType.BVN_MODIFICATION, label: 'BVN Modification' },
++  { type: TransactionType.NIN_MODIFICATION, label: 'NIN Modification' }
++];
++
++export function registerPendingSummaryRoutes(router: Router) {
++  router.get('/pending-summary', async (req: Request, res) => {
++    if (!req.session?.adminUser) {
++      return res.status(401).json({ status: false, message: 'Not signed in' });
++    }
++
++    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
++    const rows = await Promise.all(
++      PENDING_SUMMARY_TYPES.map(async ({ type, label }) => {
++        const [pending, newLast24h] = await Promise.all([
++          prisma.transaction.count({ where: { type, status: TransactionStatus.PENDING } }),
++          prisma.transaction.count({ where: { type, status: TransactionStatus.PENDING, createdAt: { gte: since24h } } })
++        ]);
++        return { type, label, pending, new_last_24h: newLast24h };
++      })
++    );
++
++    res.json({
++      status: true,
++      data: {
++        total_pending: rows.reduce((sum, r) => sum + r.pending, 0),
++        total_new_last_24h: rows.reduce((sum, r) => sum + r.new_last_24h, 0),
++        by_type: rows
++      }
++    });
++  });
++}
+diff --git a/maria_backend/src/admin/resources/transaction.resource.ts b/maria_backend/src/admin/resources/transaction.resource.ts
+index 6cf494c..ed8f2f2 100644
+--- a/maria_backend/src/admin/resources/transaction.resource.ts
++++ b/maria_backend/src/admin/resources/transaction.resource.ts
+@@ -8,6 +8,7 @@ import { TransactionStatus } from '@prisma/client';
+ import { refundWallet } from '../../services/wallet.service.js';
+ import { logAdminAction } from '../audit.js';
+ import type { AdminSessionUser } from '../auth.js';
++import { Components } from '../component-loader.js';
+ 
+ export const transactionResource: ResourceWithOptions = {
+   resource: { model: getModelByName('Transaction'), client: prisma },
+@@ -202,15 +203,20 @@ export const transactionResource: ResourceWithOptions = {
+       downloadModificationPdf: {
+         actionType: 'record',
+         icon: 'Download',
+-        // AdminJS's default assumption for a 'record' action is that it
+-        // renders a UI component (e.g. a confirmation dialog or form) -
+-        // without `component: false` it throws "You have to implement
+-        // action component for your Action" the moment it's clicked, since
+-        // this action does neither: it just runs handler() and follows the
+-        // redirectUrl it returns. Same reasoning applies to every other
+-        // pure-redirect action below (downloadBvnModificationPdf,
+-        // downloadBvnLicensePdf, manageCacRequest).
+-        component: false,
++        // `component: Components.RedirectToManage` (not `component: false`)
++        // is required here - see the long comment at the top of
++        // admin/components/redirect-to-manage.tsx for exactly why: AdminJS
++        // follows a handler's `redirectUrl` with React Router's client-side
++        // navigate(), which only works for paths inside AdminJS's own SPA.
++        // Our custom server-rendered pages below aren't, so that silently
++        // fell through to AdminJS's dashboard instead of opening the page -
++        // this component does a real `window.location.href` navigation
++        // instead, which actually leaves the SPA. Same reasoning applies to
++        // every other pure-redirect action below (downloadBvnModificationPdf,
++        // downloadBvnLicensePdf, manageCacRequest) - all four share this one
++        // component since it derives the target URL itself from
++        // `record.params.type`/`.id`.
++        component: Components.RedirectToManage,
+         isAccessible: ({ currentAdmin, record }) => {
+           const admin = currentAdmin as unknown as AdminSessionUser | undefined;
+           return admin?.role === 'SUPER_ADMIN' && record?.params?.type === 'NIN_MODIFICATION';
+@@ -220,10 +226,7 @@ export const transactionResource: ResourceWithOptions = {
+           if (!record) {
+             throw new Error('Missing record');
+           }
+-          return {
+-            record: record.toJSON(currentAdmin),
+-            redirectUrl: `/admin/nin-modification/${record.params.id as string}/pdf`
+-          };
++          return { record: record.toJSON(currentAdmin) };
+         }
+       },
+       // Same two actions as completeModification/downloadModificationPdf
+@@ -274,7 +277,7 @@ export const transactionResource: ResourceWithOptions = {
+       downloadBvnModificationPdf: {
+         actionType: 'record',
+         icon: 'Download',
+-        component: false,
++        component: Components.RedirectToManage,
+         isAccessible: ({ currentAdmin, record }) => {
+           const admin = currentAdmin as unknown as AdminSessionUser | undefined;
+           return admin?.role === 'SUPER_ADMIN' && record?.params?.type === 'BVN_MODIFICATION';
+@@ -284,10 +287,7 @@ export const transactionResource: ResourceWithOptions = {
+           if (!record) {
+             throw new Error('Missing record');
+           }
+-          return {
+-            record: record.toJSON(currentAdmin),
+-            redirectUrl: `/admin/bvn-modification/${record.params.id as string}/pdf`
+-          };
++          return { record: record.toJSON(currentAdmin) };
+         }
+       },
+       completeBvnLicense: {
+@@ -306,14 +306,14 @@ export const transactionResource: ResourceWithOptions = {
+         }
+       },
+       downloadBvnLicensePdf: {
+-        actionType: 'record', icon: 'Download', component: false,
++        actionType: 'record', icon: 'Download', component: Components.RedirectToManage,
+         isAccessible: ({ currentAdmin, record }) => {
+           const admin = currentAdmin as unknown as AdminSessionUser | undefined;
+           return admin?.role === 'SUPER_ADMIN' && record?.params?.type === 'BVN_LICENSE_ONBOARDING';
+         },
+         handler: async (_request, _response, context) => {
+           const { record, currentAdmin } = context; if (!record) throw new Error('Missing record');
+-          return { record: record.toJSON(currentAdmin), redirectUrl: `/admin/bvn-license/${record.params.id as string}/pdf` };
++          return { record: record.toJSON(currentAdmin) };
+         }
+       },
+       // Opens the custom "manage" page (admin/cac.ts) where an admin can save
+@@ -323,14 +323,14 @@ export const transactionResource: ResourceWithOptions = {
+       // not a single confirm-guard click, hence the redirect to a dedicated
+       // page instead of an inline handler.
+       manageCacRequest: {
+-        actionType: 'record', icon: 'Edit', component: false,
++        actionType: 'record', icon: 'Edit', component: Components.RedirectToManage,
+         isAccessible: ({ currentAdmin, record }) => {
+           const admin = currentAdmin as unknown as AdminSessionUser | undefined;
+           return !!admin && admin.role !== 'SUPPORT' && record?.params?.type === 'CAC_SERVICE_REQUEST';
+         },
+         handler: async (_request, _response, context) => {
+           const { record, currentAdmin } = context; if (!record) throw new Error('Missing record');
+-          return { record: record.toJSON(currentAdmin), redirectUrl: `/admin/cac/${record.params.id as string}/manage` };
++          return { record: record.toJSON(currentAdmin) };
+         }
+       }
+     }
+diff --git a/maria_backend/src/admin/setup.ts b/maria_backend/src/admin/setup.ts
+index 956069e..adce680 100644
+--- a/maria_backend/src/admin/setup.ts
++++ b/maria_backend/src/admin/setup.ts
+@@ -32,6 +32,7 @@ import { notificationBroadcastResource } from './resources/notification-broadcas
+ import { userDeliveryResource } from './resources/user-delivery.resource.js';
+ import { registerUserDeliveryRoutes } from './user-deliveries.js';
+ import { registerSupportInboxRoutes } from './support-inbox.js';
++import { registerPendingSummaryRoutes } from './pending-summary.js';
+ 
+ AdminJS.registerAdapter({ Database, Resource });
+ 
+@@ -190,6 +191,7 @@ export async function buildAdminRouter() {
+   registerCacRoutes(router);
+   registerUserDeliveryRoutes(router);
+   registerSupportInboxRoutes(router);
++  registerPendingSummaryRoutes(router);
+ 
+   return { admin, router };
+ }
+-- 
+2.43.0
+

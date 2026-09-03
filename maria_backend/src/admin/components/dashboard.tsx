@@ -1,7 +1,10 @@
-import React from 'react';
-import { Box, H2, H4, Icon, Text } from '@adminjs/design-system';
+import React, { useEffect, useState } from 'react';
+import { Box, Button, H2, H4, Icon, Text } from '@adminjs/design-system';
 
 const ADMIN_ROOT_PATH = '/admin';
+
+type PendingSummaryRow = { type: string; label: string; pending: number; new_last_24h: number };
+type PendingSummary = { total_pending: number; total_new_last_24h: number; by_type: PendingSummaryRow[] };
 
 type QuickLink = {
   label: string;
@@ -127,8 +130,93 @@ const quickLinks: QuickLink[] = [
   { label: 'Audit Log', description: 'Admin activity history', resourceId: 'AdminAuditLog', icon: 'FileText' }
 ];
 
+// Shown once per dashboard visit (mount) so an admin logging in - or just
+// navigating back to the dashboard - immediately sees what's backed up
+// across every manually-processed request type (CAC, BVN License, BVN
+// Modification, NIN Modification), instead of having to click through each
+// "Requests" tile individually to discover a queue has built up. Powered by
+// GET /api/admin/pending-summary (routes/admin-api.routes.ts).
+function PendingRequestsPopup() {
+  const [summary, setSummary] = useState<PendingSummary | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => {
+    fetch(`${ADMIN_ROOT_PATH}/pending-summary`, { credentials: 'include' })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((body) => setSummary(body.data as PendingSummary))
+      .catch(() => setLoadFailed(true));
+  }, []);
+
+  if (dismissed || loadFailed || !summary || summary.total_pending === 0) return null;
+
+  return (
+    <Box
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.55)', zIndex: 1000 }}
+      display="flex"
+      alignItems="center"
+      justifyContent="center"
+      onClick={() => setDismissed(true)}
+    >
+      <Box
+        variant="white"
+        boxShadow="card"
+        p="xl"
+        style={{ width: 'min(480px, 92vw)', borderRadius: 14 }}
+        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+      >
+        <Box display="flex" alignItems="center" mb="default">
+          <Icon icon="AlertTriangle" color="#b45309" bg="rgba(180, 83, 9, 0.12)" rounded size={22} p="default" mr="default" />
+          <H4 m={0}>Requests waiting on you</H4>
+        </Box>
+        <Text mb="lg" color="grey60">
+          {summary.total_pending} request{summary.total_pending === 1 ? '' : 's'} still unresolved
+          {summary.total_new_last_24h > 0 ? `, ${summary.total_new_last_24h} new in the last 24 hours` : ''}.
+        </Text>
+
+        <Box mb="lg">
+          {summary.by_type
+            .filter((row) => row.pending > 0)
+            .map((row) => (
+              <Box
+                key={row.type}
+                display="flex"
+                justifyContent="space-between"
+                alignItems="center"
+                py="default"
+                style={{ borderBottom: '1px solid #eef2f7' }}
+              >
+                <Box>
+                  <Text fontWeight="bold">{row.label}</Text>
+                  {row.new_last_24h > 0 && (
+                    <Text fontSize="xs" color="#b45309">
+                      {row.new_last_24h} new today
+                    </Text>
+                  )}
+                </Box>
+                <a href={`${ADMIN_ROOT_PATH}/resources/Transaction?filters.type=${row.type}&filters.status=PENDING`} style={{ textDecoration: 'none' }}>
+                  <Button size="sm" variant="text">
+                    {row.pending} pending →
+                  </Button>
+                </a>
+              </Box>
+            ))}
+        </Box>
+
+        <Button onClick={() => setDismissed(true)} style={{ width: '100%', justifyContent: 'center' }}>
+          Got it
+        </Button>
+      </Box>
+    </Box>
+  );
+}
+
 const Dashboard: React.FC = () => (
   <Box>
+    <PendingRequestsPopup />
     <Box
       position="relative"
       overflow="hidden"

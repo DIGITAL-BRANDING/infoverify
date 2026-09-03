@@ -8,5 +8,9 @@ export const Components = {
   Dashboard: componentLoader.add(
     'Dashboard',
     process.env.NODE_ENV === 'production' ? './components/dashboard.js' : './components/dashboard.tsx'
+  ),
+  RedirectToManage: componentLoader.add(
+    'RedirectToManage',
+    process.env.NODE_ENV === 'production' ? './components/redirect-to-manage.js' : './components/redirect-to-manage.tsx'
   )
 };
