@@ -31,6 +31,7 @@ import { supportTicketResource, supportTicketMessageResource } from './resources
 import { notificationBroadcastResource } from './resources/notification-broadcast.resource.js';
 import { userDeliveryResource } from './resources/user-delivery.resource.js';
 import { registerUserDeliveryRoutes } from './user-deliveries.js';
+import { registerSupportInboxRoutes } from './support-inbox.js';
 
 AdminJS.registerAdapter({ Database, Resource });
 
@@ -188,6 +189,7 @@ export async function buildAdminRouter() {
   registerBvnLicenseRoutes(router);
   registerCacRoutes(router);
   registerUserDeliveryRoutes(router);
+  registerSupportInboxRoutes(router);
 
   return { admin, router };
 }

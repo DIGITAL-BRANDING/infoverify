@@ -57,6 +57,12 @@ const quickLinks: QuickLink[] = [
     icon: 'Award'
   },
   {
+    label: 'Support Inbox',
+    description: 'Complaints sent in from customer dashboards - reply inline',
+    href: `${ADMIN_ROOT_PATH}/support-inbox`,
+    icon: 'MessageCircle'
+  },
+  {
     label: 'User Deliveries',
     description: 'Upload a manual PDF, image or token file for one customer',
     href: `${ADMIN_ROOT_PATH}/user-deliveries`,

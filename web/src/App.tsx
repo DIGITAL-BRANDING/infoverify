@@ -34,6 +34,7 @@ import DeliveriesPage from './pages/DeliveriesPage';
 import ReceiptPage from './pages/ReceiptPage';
 import ReferralPage from './pages/ReferralPage';
 import PinSetupPage from './pages/PinSetupPage';
+import SupportPage from './pages/SupportPage';
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, isLoading, mustChangePassword, requiresLoginPinSetup, requiresTransactionPinSetup } = useAuth();
@@ -99,6 +100,7 @@ export default function App() {
           <Route path="/deliveries" element={<ProtectedRoute><DeliveriesPage /></ProtectedRoute>} />
           <Route path="/receipt/:id" element={<ProtectedRoute><ReceiptPage /></ProtectedRoute>} />
           <Route path="/referrals" element={<ProtectedRoute><ReferralPage /></ProtectedRoute>} />
+          <Route path="/support" element={<ProtectedRoute><SupportPage /></ProtectedRoute>} />
           <Route path="/setup-pins" element={<ProtectedRoute><PinSetupPage /></ProtectedRoute>} />
           <Route path="/payment/callback" element={<ProtectedRoute><PaymentCallbackPage /></ProtectedRoute>} />
           <Route path="/set-new-password" element={<ProtectedRoute><SetNewPasswordPage /></ProtectedRoute>} />

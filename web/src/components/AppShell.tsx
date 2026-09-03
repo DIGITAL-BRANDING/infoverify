@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
-import { Bell, LayoutDashboard, LogOut, Menu, Smartphone, X, IdCard, Phone, BriefcaseBusiness, Fingerprint, ShieldCheck, CheckCircle2, MapPin, Search, Unlink, FilePenLine, Baby, Receipt, Newspaper, History, WalletCards } from 'lucide-react';
+import { Bell, LayoutDashboard, LogOut, Menu, Smartphone, X, IdCard, Phone, BriefcaseBusiness, Fingerprint, ShieldCheck, CheckCircle2, MapPin, Search, Unlink, FilePenLine, Baby, Receipt, Newspaper, History, WalletCards, MessageCircle } from 'lucide-react';
 import Logo from './Logo';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
@@ -10,7 +10,7 @@ import WhatsappFloat from './WhatsappFloat';
 
 type Notice = { id: string; title: string; body: string; is_read: boolean; created_at: string };
 const items = [
- ['Dashboard','/dashboard',LayoutDashboard],['NIN_Phone Verification','/nin',IdCard],['Phone Multiple','/phone',Phone],['CAC Services','/cac',BriefcaseBusiness],['BVN Verification','/bvn',Fingerprint],['IPE Clerance (Instant)','/ipe',ShieldCheck],['Validation','/validation',CheckCircle2],['Personalization','/tracking',MapPin],['BVN Retrieval','/bvn-ret',Search],['Self Service Unlink','/delink',Unlink],['NIN Modifications','/modification',FilePenLine],['Birth Attestation','/attestation',Baby],['TIN Certificate','/tin',Receipt],['Newspaper Publication','/newspaper',Newspaper],['Demographic Search','/demo',Search],['Slips History','/verifications',History],['Wallet Summary','/history',WalletCards],
+ ['Dashboard','/dashboard',LayoutDashboard],['NIN_Phone Verification','/nin',IdCard],['Phone Multiple','/phone',Phone],['CAC Services','/cac',BriefcaseBusiness],['BVN Verification','/bvn',Fingerprint],['IPE Clerance (Instant)','/ipe',ShieldCheck],['Validation','/validation',CheckCircle2],['Personalization','/tracking',MapPin],['BVN Retrieval','/bvn-ret',Search],['Self Service Unlink','/delink',Unlink],['NIN Modifications','/modification',FilePenLine],['Birth Attestation','/attestation',Baby],['TIN Certificate','/tin',Receipt],['Newspaper Publication','/newspaper',Newspaper],['Demographic Search','/demo',Search],['Slips History','/verifications',History],['Wallet Summary','/history',WalletCards],['Complaints & Support','/support',MessageCircle],
 ] as const;
 
 function Sidebar({ close }: { close?: () => void }) {
