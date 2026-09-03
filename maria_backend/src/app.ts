@@ -176,10 +176,17 @@ export function createApp() {
   // and signature check exactly as before.
   app.use('/api/webhooks', express.raw({ type: '*/*' }), webhookRoutes);
 
-  // 8mb (was 1mb) so an admin can upload a scanned CAC certificate PDF as
-  // base64 through admin/cac.ts's manage page (base64 adds ~33% overhead on
-  // top of the original file size) without hitting this ceiling.
-  app.use(express.json({ limit: '8mb' }));
+  // 20mb (previously 8mb, before that 1mb) so an admin can upload a scanned
+  // CAC certificate PDF as base64 through admin/cac.ts's manage page
+  // (base64 adds ~33% overhead on top of the original file size - a
+  // perfectly normal ~12-15mb scanned/photographed certificate already
+  // pushed past the old 8mb ceiling, which fails as an opaque
+  // "Failed to complete." in the browser since a 413 Payload Too Large
+  // response isn't JSON, and the admin page's fetch() error handling falls
+  // back to that generic message). Raised again rather than fine-tuned
+  // closer to the last real failure, since the next slightly-larger
+  // scan would just hit the same wall again.
+  app.use(express.json({ limit: '20mb' }));
 
   app.use('/api/auth', authLimiter, authRoutes);
   app.use('/api/assistant', assistantRoutes);

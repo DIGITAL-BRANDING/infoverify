@@ -1,0 +1,31 @@
+From a33f2d6bdf0de266e096a0948f10dbc9212b5bd0 Mon Sep 17 00:00:00 2001
+From: Claude <dev@infoverify.local>
+Date: Thu, 3 Sep 2026 18:11:56 +0000
+Subject: [PATCH] Fix BVN Modification ID card upload forcing camera instead of
+ letting user choose source
+
+---
+ web/src/pages/BvnModificationPage.tsx | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/web/src/pages/BvnModificationPage.tsx b/web/src/pages/BvnModificationPage.tsx
+index d472ccb..059d8ef 100644
+--- a/web/src/pages/BvnModificationPage.tsx
++++ b/web/src/pages/BvnModificationPage.tsx
+@@ -396,12 +396,11 @@ export default function BvnModificationPage() {
+                             </div>
+                           ) : (
+                             <label className={`flex cursor-pointer items-center justify-center rounded-xl border border-dashed p-4 text-center ${FORM_INPUT_CLASSES}`}>
+-                              <span className="font-body text-xs text-[#0b2f73]/70">Tap to take or upload a photo of your National ID card</span>
++                              <span className="font-body text-xs text-[#0b2f73]/70">Tap to take a photo or upload one from your device</span>
+                               <input
+                                 required={field.required}
+                                 type="file"
+                                 accept="image/png,image/jpeg,image/webp"
+-                                capture="environment"
+                                 className="hidden"
+                                 onChange={(e) => void handleImageSelect(field.key, e.target.files?.[0])}
+                               />
+-- 
+2.43.0
+

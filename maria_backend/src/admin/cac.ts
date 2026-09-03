@@ -143,7 +143,7 @@ export function registerCacRoutes(router: Router) {
       body: JSON.stringify({ action: 'notes', progress_notes: document.getElementById('notes').value })
     });
     const data = await res.json().catch(() => ({}));
-    msg.textContent = res.ok ? 'Saved.' : (data.error || 'Failed to save.');
+    msg.textContent = res.ok ? 'Saved.' : (data.error || data.message || 'Failed to save.');
   });
 
   document.getElementById('complete').addEventListener('click', async () => {
@@ -151,6 +151,18 @@ export function registerCacRoutes(router: Router) {
     const file = input.files && input.files[0];
     if (!file) { msg.textContent = 'Choose a PDF file first.'; return; }
     if (file.type !== 'application/pdf') { msg.textContent = 'Please choose a PDF file.'; return; }
+    // Base64 adds ~33% on top of the raw file size, and the server currently
+    // accepts request bodies up to 20mb (see app.ts) - 14mb raw is the
+    // largest file that stays comfortably under that after the base64
+    // conversion below. Checked here, before even reading the file, so a
+    // too-large scan gets a clear message immediately instead of a vague
+    // "Failed to complete." after a slow upload that was always going to be
+    // rejected.
+    const MAX_RAW_BYTES = 14 * 1024 * 1024;
+    if (file.size > MAX_RAW_BYTES) {
+      msg.textContent = 'That PDF is too large (' + (file.size / (1024 * 1024)).toFixed(1) + 'MB). Please compress it to under 14MB and try again.';
+      return;
+    }
     msg.textContent = 'Uploading…';
     const reader = new FileReader();
     reader.onload = async () => {
@@ -164,8 +176,16 @@ export function registerCacRoutes(router: Router) {
       if (res.ok) {
         msg.textContent = 'Marked complete. Reloading…';
         setTimeout(() => window.location.reload(), 800);
+      } else if (res.status === 413) {
+        msg.textContent = 'That PDF is too large for the server to accept. Please compress it and try again.';
       } else {
-        msg.textContent = data.error || 'Failed to complete.';
+        // The route's own catch block returns { error: '...' } (see the
+        // POST handler below), but a failure in global middleware BEFORE
+        // this route even runs (e.g. the body-size-limit check in app.ts)
+        // goes through the app-wide error handler instead, which uses
+        // { message: '...' } - checking both keeps this readable either way
+        // instead of silently falling back to a generic message.
+        msg.textContent = data.error || data.message || ('Failed to complete (HTTP ' + res.status + ').');
       }
     };
     reader.readAsDataURL(file);

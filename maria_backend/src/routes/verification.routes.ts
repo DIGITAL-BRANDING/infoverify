@@ -127,6 +127,49 @@ verificationRoutes.get('/bvn/license-onboarding/history', async (req, res) => {
   }) });
 });
 
+// Shared by both /history (one service, used inline on each verification
+// page) and /history/all (every service, used by the standalone "Slips
+// History" dashboard page) - keeps the pdf_base64/pdf_url extraction logic
+// in exactly one place instead of drifting between two copies.
+function toSlipHistoryEntry(transaction: {
+  reference: string;
+  status: string;
+  updatedAt: Date;
+  metadata: unknown;
+}) {
+  const metadata = transaction.metadata as Record<string, unknown> | null;
+  const pii = decryptTransactionPII(metadata);
+  // Older successful Techhub responses stored the provider payload under
+  // `user_data`, including its own `pdf_base64`.  Read that nested shape
+  // too, so an already-paid slip can be recovered without another call.
+  const userData = pii?.user_data as Record<string, unknown> | undefined;
+  const pdfBase64 =
+    typeof pii?.pdf_base64 === 'string' && pii.pdf_base64.trim().length > 0
+      ? pii.pdf_base64
+      : typeof userData?.pdf_base64 === 'string' && userData.pdf_base64.trim().length > 0
+        ? userData.pdf_base64
+        : null;
+  const pdfUrl =
+    typeof pii?.pdf_url === 'string' && pii.pdf_url.trim().length > 0
+      ? pii.pdf_url
+      : typeof userData?.pdf_url === 'string' && userData.pdf_url.trim().length > 0
+        ? userData.pdf_url
+        : typeof userData?.slip_url === 'string' && userData.slip_url.trim().length > 0
+          ? userData.slip_url
+          : null;
+  return {
+    reference: transaction.reference,
+    status: transaction.status.toLowerCase(),
+    created_at: transaction.updatedAt.toISOString(),
+    service: typeof metadata?.service === 'string' ? metadata.service : null,
+    // Do not return identity details here. The PDF itself is the
+    // retrievable document and the rest remains sealed in storage.
+    pdf_base64: pdfBase64,
+    pdf_url: pdfUrl,
+    ticket_id: typeof metadata?.ticket_id === 'string' ? metadata.ticket_id : null
+  };
+}
+
 // A customer can retrieve a completed verification result for seven days.
 // Async requests are intentionally absent while PENDING: their window begins
 // when the transaction becomes SUCCESS, using updatedAt as the completion time.
@@ -156,41 +199,38 @@ verificationRoutes.get('/history', async (req, res) => {
       return metadata?.service === service;
     })
     .slice(0, 10)
-    .map((transaction) => {
-      const metadata = transaction.metadata as Record<string, unknown> | null;
-      const pii = decryptTransactionPII(metadata);
-      // Older successful Techhub responses stored the provider payload under
-      // `user_data`, including its own `pdf_base64`.  Read that nested shape
-      // too, so an already-paid slip can be recovered without another call.
-      const userData = pii?.user_data as Record<string, unknown> | undefined;
-      const pdfBase64 =
-        typeof pii?.pdf_base64 === 'string' && pii.pdf_base64.trim().length > 0
-          ? pii.pdf_base64
-          : typeof userData?.pdf_base64 === 'string' && userData.pdf_base64.trim().length > 0
-            ? userData.pdf_base64
-            : null;
-      const pdfUrl =
-        typeof pii?.pdf_url === 'string' && pii.pdf_url.trim().length > 0
-          ? pii.pdf_url
-          : typeof userData?.pdf_url === 'string' && userData.pdf_url.trim().length > 0
-            ? userData.pdf_url
-            : typeof userData?.slip_url === 'string' && userData.slip_url.trim().length > 0
-              ? userData.slip_url
-              : null;
-      return {
-        reference: transaction.reference,
-        status: transaction.status.toLowerCase(),
-        created_at: transaction.updatedAt.toISOString(),
-        // Do not return identity details here. The PDF itself is the
-        // retrievable document and the rest remains sealed in storage.
-        pdf_base64: pdfBase64,
-        pdf_url: pdfUrl,
-        ticket_id: typeof metadata?.ticket_id === 'string' ? metadata.ticket_id : null
-      };
-    });
+    .map(toSlipHistoryEntry);
 
   res.set('Cache-Control', 'no-store');
   res.json({ status: true, data });
+});
+
+// Same SUCCESS-only, 7-day retrieval window as /history above, but across
+// every verification service at once instead of one at a time - backs the
+// standalone "Slips History" dashboard page (web/src/pages/SlipsHistoryPage.tsx),
+// which has no single `service` to filter by the way each dedicated
+// verification page does.
+verificationRoutes.get('/history/all', async (req, res) => {
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const transactions = await prisma.transaction.findMany({
+    where: {
+      userId: req.user!.id,
+      status: TransactionStatus.SUCCESS,
+      updatedAt: { gte: since },
+      type: {
+        in: [
+          TransactionType.NIN_VERIFICATION,
+          TransactionType.BVN_VERIFICATION,
+          TransactionType.IDENTITY_SERVICE_REQUEST
+        ]
+      }
+    },
+    orderBy: { updatedAt: 'desc' },
+    take: 50
+  });
+
+  res.set('Cache-Control', 'no-store');
+  res.json({ status: true, data: transactions.map(toSlipHistoryEntry) });
 });
 
 // ── Slip lookups (synchronous) ────────────────────────────────────

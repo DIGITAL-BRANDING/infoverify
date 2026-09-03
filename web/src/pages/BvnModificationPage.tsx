@@ -396,12 +396,11 @@ export default function BvnModificationPage() {
                             </div>
                           ) : (
                             <label className={`flex cursor-pointer items-center justify-center rounded-xl border border-dashed p-4 text-center ${FORM_INPUT_CLASSES}`}>
-                              <span className="font-body text-xs text-[#0b2f73]/70">Tap to take or upload a photo of your National ID card</span>
+                              <span className="font-body text-xs text-[#0b2f73]/70">Tap to take a photo or upload one from your device</span>
                               <input
                                 required={field.required}
                                 type="file"
                                 accept="image/png,image/jpeg,image/webp"
-                                capture="environment"
                                 className="hidden"
                                 onChange={(e) => void handleImageSelect(field.key, e.target.files?.[0])}
                               />

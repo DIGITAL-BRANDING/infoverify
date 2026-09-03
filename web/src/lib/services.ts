@@ -79,8 +79,8 @@ export const SERVICES: ServiceItem[] = [
   // and therefore no route at all anywhere - not even a "coming soon"
   // fallback, since that's generated from this array. Clicking either one
   // silently redirected to "/" with zero explanation.
-  { label: 'Slips History', description: 'Review your past verification slips.', icon: History, route: '/verifications', tint: 'bronze', implemented: false },
-  { label: 'Wallet Summary', description: 'See a summary of your wallet activity.', icon: WalletCards, route: '/history', tint: 'success', implemented: false },
+  { label: 'Slips History', description: 'Review your past verification slips.', icon: History, route: '/verifications', tint: 'bronze', implemented: true },
+  { label: 'Wallet Summary', description: 'See a summary of your wallet activity.', icon: WalletCards, route: '/history', tint: 'success', implemented: true },
   {
     label: 'Buy Data',
     description: 'Get data bundles for MTN, Glo, Airtel or 9mobile, delivered instantly.',
