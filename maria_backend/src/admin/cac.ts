@@ -205,7 +205,13 @@ export function registerCacRoutes(router: Router) {
       return res.status(404).json({ error: 'CAC request not found' });
     }
 
-    const body = req.body as { action?: string; progress_notes?: string; certificate_pdf_base64?: string };
+    // AdminJS's express-formidable parser exposes normal form/JSON payloads
+    // through `fields` and may leave `req.body` undefined.
+    const body = (req.body ?? (req as Request & { fields?: unknown }).fields ?? {}) as {
+      action?: string;
+      progress_notes?: string;
+      certificate_pdf_base64?: string;
+    };
 
     try {
       if (body.action === 'notes') {

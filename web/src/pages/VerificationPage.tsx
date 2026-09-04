@@ -231,9 +231,13 @@ export default function VerificationPage({ mode }: { mode: Mode }) {
         setAsyncResult({ ticket_id: result.data.ticket_id, reference: result.data.reference });
         setMessage('Request submitted. We\u2019ll check its status below - this is usually reviewed within a few minutes.');
       } else {
+        const rawUserData = result.data?.user_data;
+        const nestedPdf = rawUserData && typeof rawUserData === 'object'
+          ? (() => { const value = Object.entries(rawUserData).find(([key, entry]) => /pdf|base64/i.test(key) && typeof entry === 'string')?.[1]; return typeof value === 'string' ? value : undefined; })()
+          : undefined;
         setSlipResult({
-          user_data: result.data?.user_data,
-          pdf_base64: result.data?.pdf_base64,
+          user_data: rawUserData,
+          pdf_base64: result.data?.pdf_base64 ?? nestedPdf,
           pdf_url: result.data?.pdf_url,
           reference: result.data?.reference ?? '',
         });
@@ -503,7 +507,7 @@ function SlipResultView({ result, message, onDone }: { result: SlipResult; messa
       ? result.pdf_url
       : null;
   const dataEntries = result.user_data
-    ? Object.entries(result.user_data).filter(([, v]) => v !== null && v !== undefined)
+    ? Object.entries(result.user_data).filter(([key, v]) => v !== null && v !== undefined && !/pdf|base64/i.test(key))
     : [];
 
   return (
