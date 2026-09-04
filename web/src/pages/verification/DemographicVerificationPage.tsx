@@ -14,6 +14,7 @@ import {
   money,
   TILE_CLASSES,
   TILE_SELECTED_CLASSES,
+  TILE_UNSELECTED_CLASSES,
   FORM_SECTION_CLASSES,
   FORM_INPUT_CLASSES,
   FORM_LABEL_CLASSES,
@@ -117,7 +118,7 @@ export default function DemographicVerificationPage() {
                     key={tier}
                     type="button"
                     onClick={() => setSlipTier(tier)}
-                    className={`${TILE_CLASSES} ${slipTier === tier ? TILE_SELECTED_CLASSES : ''}`}
+                    className={`${TILE_CLASSES} ${slipTier === tier ? TILE_SELECTED_CLASSES : TILE_UNSELECTED_CLASSES}`}
                   >
                     <div className="mb-2 overflow-hidden rounded-lg bg-white/10">
                       <img src={SLIP_IMAGES[tier]} alt={SLIP_LABELS[tier]} className="h-16 w-full object-cover" />

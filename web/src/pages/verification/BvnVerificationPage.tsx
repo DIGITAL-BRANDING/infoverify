@@ -17,6 +17,7 @@ import {
   FORM_HELP_CLASSES,
   TILE_CLASSES,
   TILE_SELECTED_CLASSES,
+  TILE_UNSELECTED_CLASSES,
   type SlipResult,
 } from '../../components/verification/shared';
 
@@ -78,7 +79,7 @@ export default function BvnVerificationPage() {
               <StepLabel n={1}>Slip layout</StepLabel>
               <div className="mt-3 grid grid-cols-2 gap-2 sm:gap-3">
                 {TIERS.map((t) => (
-                  <button key={t} type="button" onClick={() => setTier(t)} className={`${TILE_CLASSES} ${tier === t ? TILE_SELECTED_CLASSES : ''}`}>
+                  <button key={t} type="button" onClick={() => setTier(t)} className={`${TILE_CLASSES} ${tier === t ? TILE_SELECTED_CLASSES : TILE_UNSELECTED_CLASSES}`}>
                     <span className="block text-xs font-semibold sm:text-sm">{TIER_LABEL[t]}</span>
                     <span className="mt-1 block text-xs font-bold text-gold-300">{money(prices[TIER_KEY[t]])}</span>
                   </button>

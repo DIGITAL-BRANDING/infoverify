@@ -18,6 +18,7 @@ import {
   FORM_HELP_CLASSES,
   TILE_CLASSES,
   TILE_SELECTED_CLASSES,
+  TILE_UNSELECTED_CLASSES,
   type AsyncResult,
   type TicketStatus,
 } from '../../components/verification/shared';
@@ -90,7 +91,7 @@ export default function IpeClearancePage() {
               <StepLabel n={1}>Service Type</StepLabel>
               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
                 {SERVICE_TYPES.map((s) => (
-                  <div key={s.id} className={`relative ${TILE_CLASSES} ${s.enabled ? '' : 'cursor-not-allowed opacity-50'} ${s.enabled ? TILE_SELECTED_CLASSES : ''}`}>
+                  <div key={s.id} className={`relative ${TILE_CLASSES} ${s.enabled ? '' : 'cursor-not-allowed opacity-50'} ${s.enabled ? TILE_SELECTED_CLASSES : TILE_UNSELECTED_CLASSES}`}>
                     {!s.enabled && <Lock size={12} className="absolute right-2 top-2" />}
                     <span className="block text-xs font-semibold leading-tight">{s.label}</span>
                     <span className="mt-1 block text-[10px] text-blue-100">{s.note}</span>
@@ -102,7 +103,7 @@ export default function IpeClearancePage() {
               <StepLabel n={2}>Slip Type</StepLabel>
               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
                 {SLIP_TYPES.map((s) => (
-                  <button key={s} type="button" onClick={() => setSlipType(s)} className={`${TILE_CLASSES} ${slipType === s ? TILE_SELECTED_CLASSES : ''}`}>
+                  <button key={s} type="button" onClick={() => setSlipType(s)} className={`${TILE_CLASSES} ${slipType === s ? TILE_SELECTED_CLASSES : TILE_UNSELECTED_CLASSES}`}>
                     <span className="block text-xs font-semibold sm:text-sm">{SLIP_LABEL[s]}</span>
                     <span className="mt-1 block text-xs font-bold text-gold-300">{s === 'no-slip' ? money(0) : 'Coming soon'}</span>
                   </button>

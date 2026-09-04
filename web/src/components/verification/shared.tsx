@@ -55,9 +55,21 @@ export const PHONE_KEY: Record<PhoneTier, string> = {
  * without having to remember the exact hex each time.
  */
 export const ROYAL_BLUE = '#0b2f73';
+// IMPORTANT: TILE_CLASSES deliberately does NOT include a border-color
+// utility (border-transparent, etc). Every call site must add exactly one
+// of TILE_SELECTED_CLASSES / TILE_UNSELECTED_CLASSES itself. Baking
+// `border-transparent` into TILE_CLASSES and then trying to override it by
+// appending TILE_SELECTED_CLASSES's `border-gold-400` used to silently fail:
+// both are `border-color` utilities of equal specificity, so which one wins
+// is decided by their order in Tailwind's *compiled stylesheet*, not by
+// their order in the className string - and border-transparent happened to
+// win, so a selected slip/service tile never visibly looked selected
+// anywhere in the app. Keeping the two states mutually exclusive (one or
+// the other, never both) sidesteps that class-order footgun entirely.
 export const TILE_CLASSES =
-  'rounded-xl border-2 border-transparent bg-[#0b2f73] p-3 text-center text-white shadow-sm transition hover:-translate-y-0.5 hover:brightness-110 sm:p-4';
+  'rounded-xl border-2 bg-[#0b2f73] p-3 text-center text-white shadow-sm transition hover:-translate-y-0.5 hover:brightness-110 sm:p-4';
 export const TILE_SELECTED_CLASSES = 'border-gold-400 ring-2 ring-gold-400/50 shadow-lg';
+export const TILE_UNSELECTED_CLASSES = 'border-transparent';
 export const FORM_SECTION_CLASSES = 'mt-6 rounded-2xl border border-blue-100 bg-white p-4 shadow-sm sm:p-6';
 export const FORM_INPUT_CLASSES =
   'w-full rounded-xl border border-blue-200 bg-white p-3 text-[#0b2f73] outline-none placeholder:text-blue-300 focus:border-[#0b2f73]';
@@ -177,7 +189,7 @@ export function TierCardGrid<T extends string>({
             type="button"
             disabled={disabled}
             onClick={() => !disabled && onChange(option)}
-            className={`${TILE_CLASSES} ${value === option && !disabled ? TILE_SELECTED_CLASSES : ''} ${disabled ? 'cursor-not-allowed opacity-60 hover:translate-y-0 hover:brightness-100' : ''}`}
+            className={`${TILE_CLASSES} ${value === option && !disabled ? TILE_SELECTED_CLASSES : TILE_UNSELECTED_CLASSES} ${disabled ? 'cursor-not-allowed opacity-60 hover:translate-y-0 hover:brightness-100' : ''}`}
           >
             {imageFor ? (
               <div className="mb-2 overflow-hidden rounded-lg bg-white/10">
@@ -204,9 +216,66 @@ export function TierCardGrid<T extends string>({
 }
 
 // ── Result views ──────────────────────────────────────────────────
+// ── Shared "here's your slip" building blocks ───────────────────────
+// Used by SlipResultView (synchronous providers) and AsyncResultView, once
+// a ticket-based request (BVN Retrieval, IPE Clearance, Personalization,
+// NIN Validation, Delinking) resolves to success. Previously only
+// SlipResultView had a visible download button; a successful async ticket
+// showed the personal-details overview and then just... stopped, with no
+// obvious way to get the slip. Centralizing both here means any provider
+// field named pdf_base64/pdf_url/slip_url is picked up and rendered the
+// same way everywhere, instead of only where someone remembered to wire it.
+function extractPdfFields(source: Record<string, unknown> | null | undefined) {
+  const pdfBase64 = typeof source?.pdf_base64 === 'string' && source.pdf_base64.trim().length > 0 ? source.pdf_base64 : null;
+  const pdfUrl =
+    typeof source?.pdf_url === 'string' && source.pdf_url.trim().length > 0
+      ? source.pdf_url
+      : typeof source?.slip_url === 'string' && source.slip_url.trim().length > 0
+        ? source.slip_url
+        : null;
+  return { pdfBase64, pdfUrl };
+}
+
+function DetailsOverviewGrid({ entries }: { entries: [string, unknown][] }) {
+  if (!entries.length) return null;
+  return (
+    <div className="mt-4 grid gap-x-6 gap-y-2 rounded-xl bg-blue-50 p-4 sm:grid-cols-2">
+      {entries.map(([key, value]) => (
+        <div key={key} className="flex justify-between border-b border-blue-100 py-1.5 text-sm">
+          <span className="font-body capitalize text-[#0b2f73]/70">{key.replace(/_/g, ' ')}</span>
+          <span className="break-all text-right font-body font-semibold text-[#0b2f73]">{String(value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SlipDownloadAction({ pdfBase64, pdfUrl, reference }: { pdfBase64: string | null; pdfUrl: string | null; reference: string }) {
+  const cleanBase64 = pdfBase64?.replace(/^data:application\/pdf;base64,/i, '') ?? null;
+  const href = cleanBase64 ? `data:application/pdf;base64,${cleanBase64}` : pdfUrl?.startsWith('https://') ? pdfUrl : null;
+
+  if (!href) {
+    return (
+      <p className="mt-4 rounded-xl border border-gold-500/30 bg-gold-500/10 p-3 font-body text-sm text-[#0b2f73]/80">
+        The provider confirmed this request, but did not return a downloadable PDF. Keep the reference above and contact support; do not submit or pay for the request again.
+      </p>
+    );
+  }
+  return (
+    <a
+      href={href}
+      download={`${reference || 'slip'}.pdf`}
+      target={cleanBase64 ? undefined : '_blank'}
+      rel={cleanBase64 ? undefined : 'noreferrer'}
+      className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-gold-500 py-3 font-display font-semibold text-ink"
+    >
+      <Download size={16} /> Download PDF slip
+    </a>
+  );
+}
+
 export function SlipResultView({ result, message, onDone }: { result: SlipResult; message: string; onDone: () => void }) {
-  const pdfBase64 = result.pdf_base64?.replace(/^data:application\/pdf;base64,/i, '');
-  const pdfHref = pdfBase64 ? `data:application/pdf;base64,${pdfBase64}` : result.pdf_url?.startsWith('https://') ? result.pdf_url : null;
+  const { pdfBase64, pdfUrl } = extractPdfFields({ pdf_base64: result.pdf_base64, pdf_url: result.pdf_url });
   const dataEntries = result.user_data ? Object.entries(result.user_data).filter(([, v]) => v !== null && v !== undefined) : [];
 
   return (
@@ -216,34 +285,8 @@ export function SlipResultView({ result, message, onDone }: { result: SlipResult
         <p className="font-body text-sm text-[#0b2f73]">{message}</p>
       </div>
 
-      {dataEntries.length > 0 && (
-        <div className="mt-4 grid gap-x-6 gap-y-2 rounded-xl bg-blue-50 p-4 sm:grid-cols-2">
-          {dataEntries.map(([key, value]) => (
-            <div key={key} className="flex justify-between border-b border-blue-100 py-1.5 text-sm">
-              <span className="font-body capitalize text-[#0b2f73]/70">{key.replace(/_/g, ' ')}</span>
-              <span className="break-all text-right font-body font-semibold text-[#0b2f73]">{String(value)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {pdfHref && (
-        <a
-          href={pdfHref}
-          download={`${result.reference || 'slip'}.pdf`}
-          target={pdfBase64 ? undefined : '_blank'}
-          rel={pdfBase64 ? undefined : 'noreferrer'}
-          className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-gold-500 py-3 font-display font-semibold text-ink"
-        >
-          <Download size={16} /> Download PDF slip
-        </a>
-      )}
-
-      {!pdfHref && (
-        <p className="mt-4 rounded-xl border border-gold-500/30 bg-gold-500/10 p-3 font-body text-sm text-[#0b2f73]/80">
-          The provider confirmed this request, but did not return a downloadable PDF. Keep the reference above and contact support; do not submit or pay for the request again.
-        </p>
-      )}
+      <DetailsOverviewGrid entries={dataEntries} />
+      <SlipDownloadAction pdfBase64={pdfBase64} pdfUrl={pdfUrl} reference={result.reference} />
 
       <button onClick={onDone} className="mt-3 w-full rounded-xl border border-blue-200 py-2.5 font-body text-sm text-[#0b2f73]">
         Done
@@ -268,7 +311,14 @@ export function AsyncResultView({
   onDone: () => void;
 }) {
   const state = status?.status ?? 'pending';
-  const responseEntries = status?.response ? Object.entries(status.response).filter(([, v]) => v !== null && v !== undefined) : [];
+  // Pull any pdf_base64/pdf_url/slip_url out of the raw provider response
+  // before turning the rest into the overview table below - otherwise a
+  // provider that includes the slip inline would dump a giant unreadable
+  // base64 blob as one of the "detail" rows instead of a proper file.
+  const { pdfBase64, pdfUrl } = extractPdfFields(status?.response);
+  const responseEntries = status?.response
+    ? Object.entries(status.response).filter(([key, v]) => v !== null && v !== undefined && !['pdf_base64', 'pdf_url', 'slip_url'].includes(key))
+    : [];
 
   return (
     <div className="mt-6">
@@ -292,16 +342,8 @@ export function AsyncResultView({
         </div>
       </div>
 
-      {responseEntries.length > 0 && (
-        <div className="mt-4 grid gap-x-6 gap-y-2 rounded-xl bg-blue-50 p-4 sm:grid-cols-2">
-          {responseEntries.map(([key, value]) => (
-            <div key={key} className="flex justify-between border-b border-blue-100 py-1.5 text-sm">
-              <span className="font-body capitalize text-[#0b2f73]/70">{key.replace(/_/g, ' ')}</span>
-              <span className="break-all text-right font-body font-semibold text-[#0b2f73]">{String(value)}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      <DetailsOverviewGrid entries={responseEntries} />
+      {state === 'success' && <SlipDownloadAction pdfBase64={pdfBase64} pdfUrl={pdfUrl} reference={ticket.reference} />}
 
       {state === 'pending' && (
         <button onClick={onRefresh} disabled={polling} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 py-2.5 font-body text-sm text-[#0b2f73] disabled:opacity-60">

@@ -1,0 +1,177 @@
+diff --git a/web/src/components/verification/shared.tsx b/web/src/components/verification/shared.tsx
+index 73086bf..7b4b590 100644
+--- a/web/src/components/verification/shared.tsx
++++ b/web/src/components/verification/shared.tsx
+@@ -55,9 +55,21 @@ export const PHONE_KEY: Record<PhoneTier, string> = {
+  * without having to remember the exact hex each time.
+  */
+ export const ROYAL_BLUE = '#0b2f73';
++// IMPORTANT: TILE_CLASSES deliberately does NOT include a border-color
++// utility (border-transparent, etc). Every call site must add exactly one
++// of TILE_SELECTED_CLASSES / TILE_UNSELECTED_CLASSES itself. Baking
++// `border-transparent` into TILE_CLASSES and then trying to override it by
++// appending TILE_SELECTED_CLASSES's `border-gold-400` used to silently fail:
++// both are `border-color` utilities of equal specificity, so which one wins
++// is decided by their order in Tailwind's *compiled stylesheet*, not by
++// their order in the className string - and border-transparent happened to
++// win, so a selected slip/service tile never visibly looked selected
++// anywhere in the app. Keeping the two states mutually exclusive (one or
++// the other, never both) sidesteps that class-order footgun entirely.
+ export const TILE_CLASSES =
+-  'rounded-xl border-2 border-transparent bg-[#0b2f73] p-3 text-center text-white shadow-sm transition hover:-translate-y-0.5 hover:brightness-110 sm:p-4';
++  'rounded-xl border-2 bg-[#0b2f73] p-3 text-center text-white shadow-sm transition hover:-translate-y-0.5 hover:brightness-110 sm:p-4';
+ export const TILE_SELECTED_CLASSES = 'border-gold-400 ring-2 ring-gold-400/50 shadow-lg';
++export const TILE_UNSELECTED_CLASSES = 'border-transparent';
+ export const FORM_SECTION_CLASSES = 'mt-6 rounded-2xl border border-blue-100 bg-white p-4 shadow-sm sm:p-6';
+ export const FORM_INPUT_CLASSES =
+   'w-full rounded-xl border border-blue-200 bg-white p-3 text-[#0b2f73] outline-none placeholder:text-blue-300 focus:border-[#0b2f73]';
+@@ -177,7 +189,7 @@ export function TierCardGrid<T extends string>({
+             type="button"
+             disabled={disabled}
+             onClick={() => !disabled && onChange(option)}
+-            className={`${TILE_CLASSES} ${value === option && !disabled ? TILE_SELECTED_CLASSES : ''} ${disabled ? 'cursor-not-allowed opacity-60 hover:translate-y-0 hover:brightness-100' : ''}`}
++            className={`${TILE_CLASSES} ${value === option && !disabled ? TILE_SELECTED_CLASSES : TILE_UNSELECTED_CLASSES} ${disabled ? 'cursor-not-allowed opacity-60 hover:translate-y-0 hover:brightness-100' : ''}`}
+           >
+             {imageFor ? (
+               <div className="mb-2 overflow-hidden rounded-lg bg-white/10">
+diff --git a/web/src/pages/BvnModificationPage.tsx b/web/src/pages/BvnModificationPage.tsx
+index 059d8ef..a4d3bb7 100644
+--- a/web/src/pages/BvnModificationPage.tsx
++++ b/web/src/pages/BvnModificationPage.tsx
+@@ -13,6 +13,7 @@ import {
+   FORM_HELP_CLASSES,
+   TILE_CLASSES,
+   TILE_SELECTED_CLASSES,
++  TILE_UNSELECTED_CLASSES,
+   money,
+ } from '../components/verification/shared';
+ 
+@@ -229,7 +230,7 @@ export default function BvnModificationPage() {
+             <div className="mt-5 grid gap-4 sm:grid-cols-2">
+               <button
+                 onClick={() => setStage('select')}
+-                className={`${TILE_CLASSES} flex flex-col items-center gap-2 p-6`}
++                className={`${TILE_CLASSES} ${TILE_UNSELECTED_CLASSES} flex flex-col items-center gap-2 p-6`}
+               >
+                 <CheckCircle2 size={28} />
+                 <span className="font-display text-base font-bold">I know exactly what to fix</span>
+@@ -237,7 +238,7 @@ export default function BvnModificationPage() {
+               </button>
+               <button
+                 onClick={() => setStage('verify')}
+-                className={`${TILE_CLASSES} flex flex-col items-center gap-2 p-6`}
++                className={`${TILE_CLASSES} ${TILE_UNSELECTED_CLASSES} flex flex-col items-center gap-2 p-6`}
+               >
+                 <HelpCircle size={28} />
+                 <span className="font-display text-base font-bold">I'm not sure — check first</span>
+@@ -327,7 +328,7 @@ export default function BvnModificationPage() {
+                 <button
+                   key={type.id}
+                   onClick={() => pickType(type.id)}
+-                  className={`${TILE_CLASSES} ${suggested ? TILE_SELECTED_CLASSES : ''} relative flex min-h-28 flex-col items-center justify-center text-center`}
++                  className={`${TILE_CLASSES} ${suggested ? TILE_SELECTED_CLASSES : TILE_UNSELECTED_CLASSES} relative flex min-h-28 flex-col items-center justify-center text-center`}
+                 >
+                   {suggested && <span className="absolute -top-2 left-1/2 -translate-x-1/2 rounded-full bg-gold-400 px-2 py-0.5 text-[10px] font-bold text-[#4a3505]">Suggested</span>}
+                   <span className="font-body text-sm font-semibold">{type.title}</span>
+diff --git a/web/src/pages/verification/BvnVerificationPage.tsx b/web/src/pages/verification/BvnVerificationPage.tsx
+index 4e03517..13e4dee 100644
+--- a/web/src/pages/verification/BvnVerificationPage.tsx
++++ b/web/src/pages/verification/BvnVerificationPage.tsx
+@@ -17,6 +17,7 @@ import {
+   FORM_HELP_CLASSES,
+   TILE_CLASSES,
+   TILE_SELECTED_CLASSES,
++  TILE_UNSELECTED_CLASSES,
+   type SlipResult,
+ } from '../../components/verification/shared';
+ 
+@@ -78,7 +79,7 @@ export default function BvnVerificationPage() {
+               <StepLabel n={1}>Slip layout</StepLabel>
+               <div className="mt-3 grid grid-cols-2 gap-2 sm:gap-3">
+                 {TIERS.map((t) => (
+-                  <button key={t} type="button" onClick={() => setTier(t)} className={`${TILE_CLASSES} ${tier === t ? TILE_SELECTED_CLASSES : ''}`}>
++                  <button key={t} type="button" onClick={() => setTier(t)} className={`${TILE_CLASSES} ${tier === t ? TILE_SELECTED_CLASSES : TILE_UNSELECTED_CLASSES}`}>
+                     <span className="block text-xs font-semibold sm:text-sm">{TIER_LABEL[t]}</span>
+                     <span className="mt-1 block text-xs font-bold text-gold-300">{money(prices[TIER_KEY[t]])}</span>
+                   </button>
+diff --git a/web/src/pages/verification/DemographicVerificationPage.tsx b/web/src/pages/verification/DemographicVerificationPage.tsx
+index 7ea70ec..b06b36f 100644
+--- a/web/src/pages/verification/DemographicVerificationPage.tsx
++++ b/web/src/pages/verification/DemographicVerificationPage.tsx
+@@ -14,6 +14,7 @@ import {
+   money,
+   TILE_CLASSES,
+   TILE_SELECTED_CLASSES,
++  TILE_UNSELECTED_CLASSES,
+   FORM_SECTION_CLASSES,
+   FORM_INPUT_CLASSES,
+   FORM_LABEL_CLASSES,
+@@ -117,7 +118,7 @@ export default function DemographicVerificationPage() {
+                     key={tier}
+                     type="button"
+                     onClick={() => setSlipTier(tier)}
+-                    className={`${TILE_CLASSES} ${slipTier === tier ? TILE_SELECTED_CLASSES : ''}`}
++                    className={`${TILE_CLASSES} ${slipTier === tier ? TILE_SELECTED_CLASSES : TILE_UNSELECTED_CLASSES}`}
+                   >
+                     <div className="mb-2 overflow-hidden rounded-lg bg-white/10">
+                       <img src={SLIP_IMAGES[tier]} alt={SLIP_LABELS[tier]} className="h-16 w-full object-cover" />
+diff --git a/web/src/pages/verification/IpeClearancePage.tsx b/web/src/pages/verification/IpeClearancePage.tsx
+index df904c0..49b1cb0 100644
+--- a/web/src/pages/verification/IpeClearancePage.tsx
++++ b/web/src/pages/verification/IpeClearancePage.tsx
+@@ -18,6 +18,7 @@ import {
+   FORM_HELP_CLASSES,
+   TILE_CLASSES,
+   TILE_SELECTED_CLASSES,
++  TILE_UNSELECTED_CLASSES,
+   type AsyncResult,
+   type TicketStatus,
+ } from '../../components/verification/shared';
+@@ -90,7 +91,7 @@ export default function IpeClearancePage() {
+               <StepLabel n={1}>Service Type</StepLabel>
+               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+                 {SERVICE_TYPES.map((s) => (
+-                  <div key={s.id} className={`relative ${TILE_CLASSES} ${s.enabled ? '' : 'cursor-not-allowed opacity-50'} ${s.enabled ? TILE_SELECTED_CLASSES : ''}`}>
++                  <div key={s.id} className={`relative ${TILE_CLASSES} ${s.enabled ? '' : 'cursor-not-allowed opacity-50'} ${s.enabled ? TILE_SELECTED_CLASSES : TILE_UNSELECTED_CLASSES}`}>
+                     {!s.enabled && <Lock size={12} className="absolute right-2 top-2" />}
+                     <span className="block text-xs font-semibold leading-tight">{s.label}</span>
+                     <span className="mt-1 block text-[10px] text-blue-100">{s.note}</span>
+@@ -102,7 +103,7 @@ export default function IpeClearancePage() {
+               <StepLabel n={2}>Slip Type</StepLabel>
+               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+                 {SLIP_TYPES.map((s) => (
+-                  <button key={s} type="button" onClick={() => setSlipType(s)} className={`${TILE_CLASSES} ${slipType === s ? TILE_SELECTED_CLASSES : ''}`}>
++                  <button key={s} type="button" onClick={() => setSlipType(s)} className={`${TILE_CLASSES} ${slipType === s ? TILE_SELECTED_CLASSES : TILE_UNSELECTED_CLASSES}`}>
+                     <span className="block text-xs font-semibold sm:text-sm">{SLIP_LABEL[s]}</span>
+                     <span className="mt-1 block text-xs font-bold text-gold-300">{s === 'no-slip' ? money(0) : 'Coming soon'}</span>
+                   </button>
+diff --git a/web/src/pages/verification/ValidationPage.tsx b/web/src/pages/verification/ValidationPage.tsx
+index 83ca639..f0ca49d 100644
+--- a/web/src/pages/verification/ValidationPage.tsx
++++ b/web/src/pages/verification/ValidationPage.tsx
+@@ -18,6 +18,7 @@ import {
+   FORM_HELP_CLASSES,
+   TILE_CLASSES,
+   TILE_SELECTED_CLASSES,
++  TILE_UNSELECTED_CLASSES,
+   SlipIcon,
+   type SlipIconVariant,
+   type AsyncResult,
+@@ -108,7 +109,7 @@ export default function ValidationPage() {
+               <StepLabel n={1}>Details Needed</StepLabel>
+               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+                 {DETAILS.map((d) => (
+-                  <button key={d.value} type="button" onClick={() => setDetail(d.value)} className={`${TILE_CLASSES} ${detail === d.value ? TILE_SELECTED_CLASSES : ''}`}>
++                  <button key={d.value} type="button" onClick={() => setDetail(d.value)} className={`${TILE_CLASSES} ${detail === d.value ? TILE_SELECTED_CLASSES : TILE_UNSELECTED_CLASSES}`}>
+                     <span className="block text-xs font-semibold sm:text-sm">{d.label}</span>
+                     <span className="mt-1 block text-xs font-bold text-gold-300">{money(prices[d.serviceKey])}</span>
+                   </button>
+@@ -118,7 +119,7 @@ export default function ValidationPage() {
+               <StepLabel n={2}>Slip Type</StepLabel>
+               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+                 {SLIP_TYPES.map((s) => (
+-                  <button key={s} type="button" onClick={() => setSlipType(s)} className={`${TILE_CLASSES} ${slipType === s ? TILE_SELECTED_CLASSES : ''}`}>
++                  <button key={s} type="button" onClick={() => setSlipType(s)} className={`${TILE_CLASSES} ${slipType === s ? TILE_SELECTED_CLASSES : TILE_UNSELECTED_CLASSES}`}>
+                     <div className="mb-2 flex justify-center rounded-lg bg-white/10 p-1.5">
+                       <SlipIcon variant={SLIP_ICON[s]} />
+                     </div>

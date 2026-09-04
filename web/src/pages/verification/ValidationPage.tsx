@@ -18,6 +18,7 @@ import {
   FORM_HELP_CLASSES,
   TILE_CLASSES,
   TILE_SELECTED_CLASSES,
+  TILE_UNSELECTED_CLASSES,
   SlipIcon,
   type SlipIconVariant,
   type AsyncResult,
@@ -108,7 +109,7 @@ export default function ValidationPage() {
               <StepLabel n={1}>Details Needed</StepLabel>
               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
                 {DETAILS.map((d) => (
-                  <button key={d.value} type="button" onClick={() => setDetail(d.value)} className={`${TILE_CLASSES} ${detail === d.value ? TILE_SELECTED_CLASSES : ''}`}>
+                  <button key={d.value} type="button" onClick={() => setDetail(d.value)} className={`${TILE_CLASSES} ${detail === d.value ? TILE_SELECTED_CLASSES : TILE_UNSELECTED_CLASSES}`}>
                     <span className="block text-xs font-semibold sm:text-sm">{d.label}</span>
                     <span className="mt-1 block text-xs font-bold text-gold-300">{money(prices[d.serviceKey])}</span>
                   </button>
@@ -118,7 +119,7 @@ export default function ValidationPage() {
               <StepLabel n={2}>Slip Type</StepLabel>
               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
                 {SLIP_TYPES.map((s) => (
-                  <button key={s} type="button" onClick={() => setSlipType(s)} className={`${TILE_CLASSES} ${slipType === s ? TILE_SELECTED_CLASSES : ''}`}>
+                  <button key={s} type="button" onClick={() => setSlipType(s)} className={`${TILE_CLASSES} ${slipType === s ? TILE_SELECTED_CLASSES : TILE_UNSELECTED_CLASSES}`}>
                     <div className="mb-2 flex justify-center rounded-lg bg-white/10 p-1.5">
                       <SlipIcon variant={SLIP_ICON[s]} />
                     </div>

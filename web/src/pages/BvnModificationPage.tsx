@@ -13,6 +13,7 @@ import {
   FORM_HELP_CLASSES,
   TILE_CLASSES,
   TILE_SELECTED_CLASSES,
+  TILE_UNSELECTED_CLASSES,
   money,
 } from '../components/verification/shared';
 
@@ -229,7 +230,7 @@ export default function BvnModificationPage() {
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <button
                 onClick={() => setStage('select')}
-                className={`${TILE_CLASSES} flex flex-col items-center gap-2 p-6`}
+                className={`${TILE_CLASSES} ${TILE_UNSELECTED_CLASSES} flex flex-col items-center gap-2 p-6`}
               >
                 <CheckCircle2 size={28} />
                 <span className="font-display text-base font-bold">I know exactly what to fix</span>
@@ -237,7 +238,7 @@ export default function BvnModificationPage() {
               </button>
               <button
                 onClick={() => setStage('verify')}
-                className={`${TILE_CLASSES} flex flex-col items-center gap-2 p-6`}
+                className={`${TILE_CLASSES} ${TILE_UNSELECTED_CLASSES} flex flex-col items-center gap-2 p-6`}
               >
                 <HelpCircle size={28} />
                 <span className="font-display text-base font-bold">I'm not sure — check first</span>
@@ -327,7 +328,7 @@ export default function BvnModificationPage() {
                 <button
                   key={type.id}
                   onClick={() => pickType(type.id)}
-                  className={`${TILE_CLASSES} ${suggested ? TILE_SELECTED_CLASSES : ''} relative flex min-h-28 flex-col items-center justify-center text-center`}
+                  className={`${TILE_CLASSES} ${suggested ? TILE_SELECTED_CLASSES : TILE_UNSELECTED_CLASSES} relative flex min-h-28 flex-col items-center justify-center text-center`}
                 >
                   {suggested && <span className="absolute -top-2 left-1/2 -translate-x-1/2 rounded-full bg-gold-400 px-2 py-0.5 text-[10px] font-bold text-[#4a3505]">Suggested</span>}
                   <span className="font-body text-sm font-semibold">{type.title}</span>
