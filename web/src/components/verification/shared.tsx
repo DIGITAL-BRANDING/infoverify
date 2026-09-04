@@ -226,7 +226,14 @@ export function TierCardGrid<T extends string>({
 // field named pdf_base64/pdf_url/slip_url is picked up and rendered the
 // same way everywhere, instead of only where someone remembered to wire it.
 function extractPdfFields(source: Record<string, unknown> | null | undefined) {
-  const pdfBase64 = typeof source?.pdf_base64 === 'string' && source.pdf_base64.trim().length > 0 ? source.pdf_base64 : null;
+  const directPdf = typeof source?.pdf_base64 === 'string' && source.pdf_base64.trim().length > 0 ? source.pdf_base64 : null;
+  // EaseID may return the document as "Pdf Base64" within user_data rather
+  // than the usual pdf_base64 field. Accept either spelling without showing
+  // the encoded document as a text row.
+  const nestedPdf = source
+    ? Object.entries(source).find(([key, value]) => /pdf|base64/i.test(key) && typeof value === 'string' && value.trim().length > 0)?.[1]
+    : undefined;
+  const pdfBase64 = directPdf ?? (typeof nestedPdf === 'string' ? nestedPdf : null);
   const pdfUrl =
     typeof source?.pdf_url === 'string' && source.pdf_url.trim().length > 0
       ? source.pdf_url
@@ -262,21 +269,18 @@ function SlipDownloadAction({ pdfBase64, pdfUrl, reference }: { pdfBase64: strin
     );
   }
   return (
-    <a
-      href={href}
-      download={`${reference || 'slip'}.pdf`}
-      target={cleanBase64 ? undefined : '_blank'}
-      rel={cleanBase64 ? undefined : 'noreferrer'}
-      className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-gold-500 py-3 font-display font-semibold text-ink"
-    >
-      <Download size={16} /> Download PDF slip
-    </a>
+    <div className="mt-4 space-y-3">
+      <iframe title="Verification slip preview" src={href} className="h-[560px] w-full rounded-xl border border-blue-200 bg-white" />
+      <a href={href} download={`${reference || 'slip'}.pdf`} target={cleanBase64 ? undefined : '_blank'} rel={cleanBase64 ? undefined : 'noreferrer'} className="flex w-full items-center justify-center gap-2 rounded-xl bg-gold-500 py-3 font-display font-semibold text-ink">
+        <Download size={16} /> Download PDF slip
+      </a>
+    </div>
   );
 }
 
 export function SlipResultView({ result, message, onDone }: { result: SlipResult; message: string; onDone: () => void }) {
-  const { pdfBase64, pdfUrl } = extractPdfFields({ pdf_base64: result.pdf_base64, pdf_url: result.pdf_url });
-  const dataEntries = result.user_data ? Object.entries(result.user_data).filter(([, v]) => v !== null && v !== undefined) : [];
+  const { pdfBase64, pdfUrl } = extractPdfFields({ ...result.user_data, pdf_base64: result.pdf_base64, pdf_url: result.pdf_url });
+  const dataEntries = result.user_data ? Object.entries(result.user_data).filter(([key, v]) => v !== null && v !== undefined && !/pdf|base64/i.test(key)) : [];
 
   return (
     <div className="mt-6">
