@@ -189,7 +189,20 @@ export function createApp() {
   // back to that generic message). Raised again rather than fine-tuned
   // closer to the last real failure, since the next slightly-larger
   // scan would just hit the same wall again.
-  app.use(express.json({ limit: '20mb' }));
+  // Skipped for /admin: AdminJSExpress's buildAuthenticatedRouter() (mounted
+  // below at ADMIN_ROOT_PATH) installs its OWN router-level body parser
+  // (express-formidable - see the comment atop admin/bulk-pricing.ts and
+  // admin/user-wallet.ts) before any of its own or our custom admin routes
+  // run. Running express.json() globally here consumed the request body
+  // stream first, leaving nothing for that formidable middleware to read -
+  // which is exactly what AdminJS's own body-parser guard detects and
+  // throws on ("You probably used old body-parser middleware..."), taking
+  // down every /admin request (login included) with a 500. Same
+  // conditional-skip pattern already used for helmet/cors above.
+  app.use((req, res, next) => {
+    if (req.path.startsWith(ADMIN_ROOT_PATH)) return next();
+    return express.json({ limit: '20mb' })(req, res, next);
+  });
 
   app.use('/api/auth', authLimiter, authRoutes);
   app.use('/api/assistant', assistantRoutes);

@@ -1,0 +1,54 @@
+From b18b08f03b964fc6f72ebecc4f680009d58730ee Mon Sep 17 00:00:00 2001
+From: Claude <dev@infoverify.local>
+Date: Fri, 4 Sep 2026 08:38:12 +0000
+Subject: [PATCH] Fix AdminJS crash: skip global express.json() for /admin
+
+AdminJSExpress's buildAuthenticatedRouter() (mounted at ADMIN_ROOT_PATH)
+installs its own router-level body parser (express-formidable - see the
+existing comment atop admin/bulk-pricing.ts and admin/user-wallet.ts)
+before any route on that router runs. The global app.use(express.json())
+above it was consuming the request body stream first on every single
+/admin request, leaving nothing for that formidable middleware to read -
+exactly what AdminJS's own guard detects and throws
+"You probably used old body-parser middleware..." on, taking down /admin
+(login included) with a 500.
+
+Fix mirrors the conditional-skip pattern already used for helmet/cors
+just above it in this same file: express.json() now only runs for
+non-/admin paths, leaving the body stream untouched for AdminJS's router
+to parse itself.
+
+Verified: all 173 existing backend tests still pass unchanged.
+---
+ maria_backend/src/app.ts | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/maria_backend/src/app.ts b/maria_backend/src/app.ts
+index d369aa3..c71ceda 100644
+--- a/maria_backend/src/app.ts
++++ b/maria_backend/src/app.ts
+@@ -189,7 +189,20 @@ export function createApp() {
+   // back to that generic message). Raised again rather than fine-tuned
+   // closer to the last real failure, since the next slightly-larger
+   // scan would just hit the same wall again.
+-  app.use(express.json({ limit: '20mb' }));
++  // Skipped for /admin: AdminJSExpress's buildAuthenticatedRouter() (mounted
++  // below at ADMIN_ROOT_PATH) installs its OWN router-level body parser
++  // (express-formidable - see the comment atop admin/bulk-pricing.ts and
++  // admin/user-wallet.ts) before any of its own or our custom admin routes
++  // run. Running express.json() globally here consumed the request body
++  // stream first, leaving nothing for that formidable middleware to read -
++  // which is exactly what AdminJS's own body-parser guard detects and
++  // throws on ("You probably used old body-parser middleware..."), taking
++  // down every /admin request (login included) with a 500. Same
++  // conditional-skip pattern already used for helmet/cors above.
++  app.use((req, res, next) => {
++    if (req.path.startsWith(ADMIN_ROOT_PATH)) return next();
++    return express.json({ limit: '20mb' })(req, res, next);
++  });
+ 
+   app.use('/api/auth', authLimiter, authRoutes);
+   app.use('/api/assistant', assistantRoutes);
+-- 
+2.43.0
+
