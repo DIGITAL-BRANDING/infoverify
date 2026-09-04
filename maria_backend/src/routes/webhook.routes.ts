@@ -147,13 +147,20 @@ webhookRoutes.post('/katpay', async (req, res) => {
   const timestamp = req.header('x-katpay-timestamp');
   const secret = env.KATPAY_WEBHOOK_SECRET ?? env.KATPAY_SECRET_KEY;
 
-  if (!secret || !signature || !timestamp) {
+  if (!secret) {
     console.warn('[katpay-webhook] rejected - missing required data', {
       hasSecret: Boolean(secret),
       hasSignatureHeader: Boolean(signature),
       hasTimestampHeader: Boolean(timestamp),
       contentType: req.header('content-type') ?? null
     });
+    // A webhook secret is required before we can safely process a delivery.
+    // Acknowledge the request when configuration is absent so KatPay does not
+    // retry indefinitely; wallet funding still has the explicit verify fallback.
+    return res.status(200).json({ ok: true, ignored: true, reason: 'Webhook secret not configured' });
+  }
+  if (!signature || !timestamp) {
+    console.warn('[katpay-webhook] rejected - missing signature/timestamp');
     return res.status(400).json({ error: 'Missing required headers' });
   }
 

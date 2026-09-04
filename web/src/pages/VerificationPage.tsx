@@ -525,15 +525,12 @@ function SlipResultView({ result, message, onDone }: { result: SlipResult; messa
       )}
 
       {pdfHref && (
-        <a
-          href={pdfHref}
-          download={`${result.reference || 'slip'}.pdf`}
-          target={pdfBase64 ? undefined : '_blank'}
-          rel={pdfBase64 ? undefined : 'noreferrer'}
-          className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-gold-500 py-3 font-display font-semibold text-ink"
-        >
-          <Download size={16} /> Download PDF slip
-        </a>
+        <div className="mt-4 space-y-3">
+          <iframe title="Verification slip preview" src={pdfHref} className="h-[520px] w-full rounded-xl border border-parchment-line bg-white" />
+          <a href={pdfHref} download={`${result.reference || 'slip'}.pdf`} target={pdfBase64 ? undefined : '_blank'} rel={pdfBase64 ? undefined : 'noreferrer'} className="flex w-full items-center justify-center gap-2 rounded-xl bg-gold-500 py-3 font-display font-semibold text-ink">
+            <Download size={16} /> Download PDF slip
+          </a>
+        </div>
       )}
 
       {!pdfHref && (

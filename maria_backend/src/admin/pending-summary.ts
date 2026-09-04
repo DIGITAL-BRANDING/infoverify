@@ -40,11 +40,18 @@ export function registerPendingSummaryRoutes(router: Router) {
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const rows = await Promise.all(
       PENDING_SUMMARY_TYPES.map(async ({ type, label }) => {
-        const [pending, newLast24h] = await Promise.all([
-          prisma.transaction.count({ where: { type, status: TransactionStatus.PENDING } }),
-          prisma.transaction.count({ where: { type, status: TransactionStatus.PENDING, createdAt: { gte: since24h } } })
-        ]);
-        return { type, label, pending, new_last_24h: newLast24h };
+        try {
+          const [pending, newLast24h] = await Promise.all([
+            prisma.transaction.count({ where: { type, status: TransactionStatus.PENDING } }),
+            prisma.transaction.count({ where: { type, status: TransactionStatus.PENDING, createdAt: { gte: since24h } } })
+          ]);
+          return { type, label, pending, new_last_24h: newLast24h };
+        } catch (error) {
+          // Older production databases may not yet have the newest enum value.
+          // Keep the admin dashboard alive; the migration can be applied later.
+          console.warn(`[admin] pending summary unavailable for ${String(type)}`, error instanceof Error ? error.message : error);
+          return { type, label, pending: 0, new_last_24h: 0 };
+        }
       })
     );
 
