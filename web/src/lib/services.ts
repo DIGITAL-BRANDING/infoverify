@@ -60,9 +60,9 @@ export const SERVICES: ServiceItem[] = [
   // "/" with no explanation. `false` correctly routes them through the
   // SERVICES.filter(!implemented) loop below to the friendly
   // "coming soon" page instead.
-  { label: 'Birth Attestation', description: 'Birth attestation services.', icon: Receipt, route: '/attestation', tint: 'success', implemented: false },
+  { label: 'Birth Attestation', description: 'Birth attestation services.', icon: Receipt, route: '/attestation', tint: 'success', implemented: true },
   { label: 'TIN Certificate', description: 'Get your TIN certificate.', icon: Receipt, route: '/tin', tint: 'ember', implemented: false },
-  { label: 'Newspaper Publication', description: 'Publish notices in newspapers.', icon: MessageSquare, route: '/newspaper', tint: 'gold', implemented: false },
+  { label: 'Newspaper Publication', description: 'Publish notices in newspapers.', icon: MessageSquare, route: '/newspaper', tint: 'gold', implemented: true },
   { label: 'Demographic Search', description: 'Search demographic records.', icon: Search, route: '/demo', tint: 'bronze', implemented: true },
   // These two now have real dedicated pages + <Route> entries in App.tsx
   // (BvnLicensePage, BvnModificationPage). Leaving `implemented: false`

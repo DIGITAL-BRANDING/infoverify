@@ -1,0 +1,1650 @@
+From 6d1b63c3a08dc1c257e85b1698a2615e586d904b Mon Sep 17 00:00:00 2001
+From: Claude <dev@infoverify.local>
+Date: Fri, 4 Sep 2026 08:04:49 +0000
+Subject: [PATCH] Add Birth Attestation and Newspaper Publication
+ (manual-review, per reference forms)
+
+Same manual-review pattern as NIN/BVN Modification throughout - no
+provider API for either of these, so both debit the wallet, render a
+submission PDF, and leave the transaction PENDING for an admin to
+process by hand (NPC for attestation, BluePrint/DailyTrust for the
+newspaper publication) and mark complete via the Transaction resource.
+
+New TransactionType values: BIRTH_ATTESTATION, NEWSPAPER_PUBLICATION
+(+ migration, both ADD VALUE IF NOT EXISTS in one file since neither
+is referenced by the other statement in the same transaction).
+
+Birth Attestation (birth-attestation.service.ts/.routes.ts, price
+20000, single fixed field list - the reference design's own dropdown
+only had one option):
+- Full field set from the reference form, grouped into sections
+  (Applicant, Origin & Birth, Registration, Address & Background,
+  Father's Details, Mother's Details, Photo) via a new  field
+  property, purely presentational - GET /fields exposes it so the
+  frontend can group without duplicating the list.
+- 'image' input (Upload Clean Picture) reuses the same data-URL +
+  7MB-base64-cap + doc.image()-embed approach bvn-modification.service
+  .ts already established for its ID card photo field.
+
+Newspaper Publication (newspaper-publication.service.ts/.routes.ts,
+price 3300, single fixed field list): old/new first/last/middle name,
+split into Old Details / New Details on the PDF and the form.
+
+Admin wiring for both: completeX/downloadXPdf action pairs on the
+Transaction resource (mirrors completeBvnModification's pair exactly),
+the PENDING-reversal allowlist extended, TARGET_PATH_BY_TYPE in
+redirect-to-manage.tsx extended (this component fixes a real AdminJS
+redirectUrl-vs-SPA-router bug - see its own comment), and a
+SUPER_ADMIN-only audited PDF route per type (mirrors
+admin/bvn-modification.ts), registered in admin/setup.ts.
+
+Frontend: BirthAttestationPage.tsx (/attestation, services.ts flipped
+to implemented: true) renders the field list grouped by section with
+an inline consent checkbox (wording matches the reference screenshot
+exactly, not a modal like NIN/BVN Modification's ModificationConsent).
+NewspaperPublicationPage.tsx (/newspaper, also flipped) splits its six
+fields into Old Details / New Details with its own inline confirm
+checkbox. Both otherwise follow BvnModificationPage.tsx's dynamic
+field-render + PIN-confirm + history/PDF-download shape.
+
+Verified: all 173 existing backend tests still pass unchanged (vitest
+run - nothing broken). Frontend tsc + vite build both clean. Backend
+tsc shows the same class of stale-Prisma-client errors already present
+on bvn-modification.service.ts (untouched, pre-existing file, 8 of the
+same errors) - not something introduced here; this sandbox cannot run
+prisma generate (binaries.prisma.sh is outside its network allowlist),
+so the cached client predates schema.prisma's two new enum values.
+Running prisma generate locally clears these the same way it always
+has.
+---
+ .../migration.sql                             |   3 +
+ maria_backend/prisma/schema.prisma            |  11 +
+ maria_backend/src/admin/birth-attestation.ts  |  52 ++++
+ .../admin/components/redirect-to-manage.tsx   |   4 +-
+ .../src/admin/newspaper-publication.ts        |  52 ++++
+ .../admin/resources/transaction.resource.ts   | 124 +++++++-
+ maria_backend/src/admin/setup.ts              |   4 +
+ maria_backend/src/app.ts                      |   4 +
+ .../src/routes/birth-attestation.routes.ts    | 100 ++++++
+ .../routes/newspaper-publication.routes.ts    |  65 ++++
+ .../src/services/birth-attestation.service.ts | 285 ++++++++++++++++++
+ .../services/newspaper-publication.service.ts | 211 +++++++++++++
+ web/src/App.tsx                               |   4 +
+ web/src/lib/services.ts                       |   4 +-
+ web/src/pages/BirthAttestationPage.tsx        | 277 +++++++++++++++++
+ web/src/pages/NewspaperPublicationPage.tsx    | 194 ++++++++++++
+ 16 files changed, 1390 insertions(+), 4 deletions(-)
+ create mode 100644 maria_backend/prisma/migrations/20260904090000_add_attestation_and_newspaper_types/migration.sql
+ create mode 100644 maria_backend/src/admin/birth-attestation.ts
+ create mode 100644 maria_backend/src/admin/newspaper-publication.ts
+ create mode 100644 maria_backend/src/routes/birth-attestation.routes.ts
+ create mode 100644 maria_backend/src/routes/newspaper-publication.routes.ts
+ create mode 100644 maria_backend/src/services/birth-attestation.service.ts
+ create mode 100644 maria_backend/src/services/newspaper-publication.service.ts
+ create mode 100644 web/src/pages/BirthAttestationPage.tsx
+ create mode 100644 web/src/pages/NewspaperPublicationPage.tsx
+
+diff --git a/maria_backend/prisma/migrations/20260904090000_add_attestation_and_newspaper_types/migration.sql b/maria_backend/prisma/migrations/20260904090000_add_attestation_and_newspaper_types/migration.sql
+new file mode 100644
+index 0000000..5832af6
+--- /dev/null
++++ b/maria_backend/prisma/migrations/20260904090000_add_attestation_and_newspaper_types/migration.sql
+@@ -0,0 +1,3 @@
++-- AlterEnum
++ALTER TYPE "TransactionType" ADD VALUE IF NOT EXISTS 'BIRTH_ATTESTATION';
++ALTER TYPE "TransactionType" ADD VALUE IF NOT EXISTS 'NEWSPAPER_PUBLICATION';
+diff --git a/maria_backend/prisma/schema.prisma b/maria_backend/prisma/schema.prisma
+index fdcc4a4..964907a 100644
+--- a/maria_backend/prisma/schema.prisma
++++ b/maria_backend/prisma/schema.prisma
+@@ -77,6 +77,17 @@ enum TransactionType {
+   /// hand wherever BVN modifications are actually filed, then marks it
+   /// complete. See bvn-modification.service.ts.
+   BVN_MODIFICATION
++  /// A submitted Birth Attestation request (NPC Birth Attestation & Instant
++  /// approval). No provider API - same manual pattern as the other
++  /// identity-service requests above: debit now, admin processes it by hand
++  /// with NPC and marks it complete, or reverses it to refund. See
++  /// birth-attestation.service.ts.
++  BIRTH_ATTESTATION
++  /// A submitted Newspaper Publication (name change) request. No provider
++  /// API - same manual pattern: debit now, admin places the actual
++  /// newspaper publication and affidavit by hand, then marks it complete or
++  /// reverses it. See newspaper-publication.service.ts.
++  NEWSPAPER_PUBLICATION
+   /// The credit-back entry refundWallet() creates - distinct from the
+   /// original debit's own type (e.g. a reversed DATA_PURCHASE gets a REFUND
+   /// entry, not a second DATA_PURCHASE). See relatedTransactionId above.
+diff --git a/maria_backend/src/admin/birth-attestation.ts b/maria_backend/src/admin/birth-attestation.ts
+new file mode 100644
+index 0000000..88bd978
+--- /dev/null
++++ b/maria_backend/src/admin/birth-attestation.ts
+@@ -0,0 +1,52 @@
++import type { Request, Router } from 'express';
++import { TransactionType } from '@prisma/client';
++import { prisma } from '../lib/prisma.js';
++import { decryptBirthAttestationPII } from '../services/birth-attestation.service.js';
++import { logAdminAction } from './audit.js';
++import type { AdminSessionUser } from './auth.js';
++
++declare module 'express-session' {
++  interface SessionData {
++    adminUser?: AdminSessionUser;
++  }
++}
++
++/**
++ * Same SUPER_ADMIN-only, audit-logged PDF stream as
++ * registerBvnModificationRoutes() in bvn-modification.ts - see that file's
++ * comment. Reached via the "Download PDF" admin action's redirectUrl on the
++ * Transaction resource.
++ */
++export function registerBirthAttestationRoutes(router: Router) {
++  router.get('/birth-attestation/:transactionId/pdf', async (req: Request, res) => {
++    const admin = req.session?.adminUser;
++    if (!admin) return res.redirect('/admin/login');
++    if (admin.role !== 'SUPER_ADMIN') {
++      return res.status(403).type('html').send('<p>Only a Super Admin can open Birth Attestation submission PDFs.</p>');
++    }
++
++    const transactionId = Array.isArray(req.params.transactionId) ? req.params.transactionId[0] : req.params.transactionId;
++    const transaction = await prisma.transaction.findUnique({ where: { id: transactionId } });
++    if (!transaction || transaction.type !== TransactionType.BIRTH_ATTESTATION) {
++      return res.status(404).type('html').send('<p>Birth Attestation transaction not found.</p>');
++    }
++
++    const pii = decryptBirthAttestationPII(transaction);
++    if (!pii?.pdf_base64 || typeof pii.pdf_base64 !== 'string') {
++      return res.status(404).type('html').send('<p>No PDF was generated for this request.</p>');
++    }
++
++    await logAdminAction({
++      adminId: admin.id,
++      action: 'VIEW_TRANSACTION_PII',
++      targetType: 'Transaction',
++      targetId: transaction.id,
++      metadata: { reference: transaction.reference, via: 'birth_attestation_pdf' }
++    });
++
++    const buffer = Buffer.from(pii.pdf_base64, 'base64');
++    res.setHeader('Content-Type', 'application/pdf');
++    res.setHeader('Content-Disposition', `inline; filename="${transaction.reference}.pdf"`);
++    res.send(buffer);
++  });
++}
+diff --git a/maria_backend/src/admin/components/redirect-to-manage.tsx b/maria_backend/src/admin/components/redirect-to-manage.tsx
+index 8cda659..d3e8e2a 100644
+--- a/maria_backend/src/admin/components/redirect-to-manage.tsx
++++ b/maria_backend/src/admin/components/redirect-to-manage.tsx
+@@ -31,7 +31,9 @@ const TARGET_PATH_BY_TYPE: Record<string, (id: string) => string> = {
+   CAC_SERVICE_REQUEST: (id) => `/admin/cac/${id}/manage`,
+   NIN_MODIFICATION: (id) => `/admin/nin-modification/${id}/pdf`,
+   BVN_LICENSE_ONBOARDING: (id) => `/admin/bvn-license/${id}/pdf`,
+-  BVN_MODIFICATION: (id) => `/admin/bvn-modification/${id}/pdf`
++  BVN_MODIFICATION: (id) => `/admin/bvn-modification/${id}/pdf`,
++  BIRTH_ATTESTATION: (id) => `/admin/birth-attestation/${id}/pdf`,
++  NEWSPAPER_PUBLICATION: (id) => `/admin/newspaper-publication/${id}/pdf`
+ };
+ 
+ const RedirectToManage: React.FC<RedirectToManageProps> = ({ record }) => {
+diff --git a/maria_backend/src/admin/newspaper-publication.ts b/maria_backend/src/admin/newspaper-publication.ts
+new file mode 100644
+index 0000000..b501640
+--- /dev/null
++++ b/maria_backend/src/admin/newspaper-publication.ts
+@@ -0,0 +1,52 @@
++import type { Request, Router } from 'express';
++import { TransactionType } from '@prisma/client';
++import { prisma } from '../lib/prisma.js';
++import { decryptNewspaperPublicationPII } from '../services/newspaper-publication.service.js';
++import { logAdminAction } from './audit.js';
++import type { AdminSessionUser } from './auth.js';
++
++declare module 'express-session' {
++  interface SessionData {
++    adminUser?: AdminSessionUser;
++  }
++}
++
++/**
++ * Same SUPER_ADMIN-only, audit-logged PDF stream as
++ * registerBvnModificationRoutes() in bvn-modification.ts - see that file's
++ * comment. Reached via the "Download PDF" admin action's redirectUrl on the
++ * Transaction resource.
++ */
++export function registerNewspaperPublicationRoutes(router: Router) {
++  router.get('/newspaper-publication/:transactionId/pdf', async (req: Request, res) => {
++    const admin = req.session?.adminUser;
++    if (!admin) return res.redirect('/admin/login');
++    if (admin.role !== 'SUPER_ADMIN') {
++      return res.status(403).type('html').send('<p>Only a Super Admin can open Newspaper Publication submission PDFs.</p>');
++    }
++
++    const transactionId = Array.isArray(req.params.transactionId) ? req.params.transactionId[0] : req.params.transactionId;
++    const transaction = await prisma.transaction.findUnique({ where: { id: transactionId } });
++    if (!transaction || transaction.type !== TransactionType.NEWSPAPER_PUBLICATION) {
++      return res.status(404).type('html').send('<p>Newspaper Publication transaction not found.</p>');
++    }
++
++    const pii = decryptNewspaperPublicationPII(transaction);
++    if (!pii?.pdf_base64 || typeof pii.pdf_base64 !== 'string') {
++      return res.status(404).type('html').send('<p>No PDF was generated for this request.</p>');
++    }
++
++    await logAdminAction({
++      adminId: admin.id,
++      action: 'VIEW_TRANSACTION_PII',
++      targetType: 'Transaction',
++      targetId: transaction.id,
++      metadata: { reference: transaction.reference, via: 'newspaper_publication_pdf' }
++    });
++
++    const buffer = Buffer.from(pii.pdf_base64, 'base64');
++    res.setHeader('Content-Type', 'application/pdf');
++    res.setHeader('Content-Disposition', `inline; filename="${transaction.reference}.pdf"`);
++    res.send(buffer);
++  });
++}
+diff --git a/maria_backend/src/admin/resources/transaction.resource.ts b/maria_backend/src/admin/resources/transaction.resource.ts
+index ed8f2f2..4fa999d 100644
+--- a/maria_backend/src/admin/resources/transaction.resource.ts
++++ b/maria_backend/src/admin/resources/transaction.resource.ts
+@@ -4,6 +4,8 @@ import { prisma } from '../../lib/prisma.js';
+ import { decryptTransactionPII } from '../../services/verification.service.js';
+ import { completeModification } from '../../services/nin-modification.service.js';
+ import { completeBvnModification } from '../../services/bvn-modification.service.js';
++import { completeBirthAttestation } from '../../services/birth-attestation.service.js';
++import { completeNewspaperPublication } from '../../services/newspaper-publication.service.js';
+ import { TransactionStatus } from '@prisma/client';
+ import { refundWallet } from '../../services/wallet.service.js';
+ import { logAdminAction } from '../audit.js';
+@@ -67,7 +69,7 @@ export const transactionResource: ResourceWithOptions = {
+           // other transaction type, where PENDING means "still in flight,
+           // don't touch it", so this is the one type reverse() also allows
+           // from PENDING.
+-          if (status === 'PENDING') return ['NIN_MODIFICATION', 'BVN_LICENSE_ONBOARDING', 'CAC_SERVICE_REQUEST', 'BVN_MODIFICATION'].includes(record?.params?.type as string);
++          if (status === 'PENDING') return ['NIN_MODIFICATION', 'BVN_LICENSE_ONBOARDING', 'CAC_SERVICE_REQUEST', 'BVN_MODIFICATION', 'BIRTH_ATTESTATION', 'NEWSPAPER_PUBLICATION'].includes(record?.params?.type as string);
+           return status === 'SUCCESS' || status === 'FAILED';
+         },
+         handler: async (request, response, context) => {
+@@ -290,6 +292,126 @@ export const transactionResource: ResourceWithOptions = {
+           return { record: record.toJSON(currentAdmin) };
+         }
+       },
++      // Same two actions as completeBvnModification/downloadBvnModificationPdf
++      // above, for BIRTH_ATTESTATION rows - see birth-attestation.service.ts.
++      completeBirthAttestation: {
++        actionType: 'record',
++        icon: 'CheckCircle',
++        guard: 'Mark this Birth Attestation request as completed? Only do this after NPC has actually processed it.',
++        isAccessible: ({ currentAdmin, record }) => {
++          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
++          if (!admin || admin.role === 'SUPPORT') return false;
++          return record?.params?.type === 'BIRTH_ATTESTATION' && record?.params?.status === 'PENDING';
++        },
++        handler: async (request, response, context) => {
++          const { record, currentAdmin } = context;
++          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
++          if (!record || !admin) {
++            throw new Error('Missing record or admin context');
++          }
++
++          try {
++            await completeBirthAttestation({ transactionId: record.params.id as string });
++
++            await logAdminAction({
++              adminId: admin.id,
++              action: 'COMPLETE_BIRTH_ATTESTATION',
++              targetType: 'Transaction',
++              targetId: record.params.id as string,
++              metadata: { reference: record.params.reference }
++            });
++
++            return {
++              record: record.toJSON(currentAdmin),
++              notice: { message: 'Marked as completed.', type: 'success' }
++            };
++          } catch (error) {
++            return {
++              record: record.toJSON(currentAdmin),
++              notice: {
++                message: error instanceof Error ? error.message : 'Could not mark this as completed',
++                type: 'error'
++              }
++            };
++          }
++        }
++      },
++      downloadBirthAttestationPdf: {
++        actionType: 'record',
++        icon: 'Download',
++        component: Components.RedirectToManage,
++        isAccessible: ({ currentAdmin, record }) => {
++          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
++          return admin?.role === 'SUPER_ADMIN' && record?.params?.type === 'BIRTH_ATTESTATION';
++        },
++        handler: async (request, response, context) => {
++          const { record, currentAdmin } = context;
++          if (!record) {
++            throw new Error('Missing record');
++          }
++          return { record: record.toJSON(currentAdmin) };
++        }
++      },
++      // Same pair again, for NEWSPAPER_PUBLICATION rows - see
++      // newspaper-publication.service.ts.
++      completeNewspaperPublication: {
++        actionType: 'record',
++        icon: 'CheckCircle',
++        guard: 'Mark this Newspaper Publication request as completed? Only do this after the publication has actually been placed.',
++        isAccessible: ({ currentAdmin, record }) => {
++          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
++          if (!admin || admin.role === 'SUPPORT') return false;
++          return record?.params?.type === 'NEWSPAPER_PUBLICATION' && record?.params?.status === 'PENDING';
++        },
++        handler: async (request, response, context) => {
++          const { record, currentAdmin } = context;
++          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
++          if (!record || !admin) {
++            throw new Error('Missing record or admin context');
++          }
++
++          try {
++            await completeNewspaperPublication({ transactionId: record.params.id as string });
++
++            await logAdminAction({
++              adminId: admin.id,
++              action: 'COMPLETE_NEWSPAPER_PUBLICATION',
++              targetType: 'Transaction',
++              targetId: record.params.id as string,
++              metadata: { reference: record.params.reference }
++            });
++
++            return {
++              record: record.toJSON(currentAdmin),
++              notice: { message: 'Marked as completed.', type: 'success' }
++            };
++          } catch (error) {
++            return {
++              record: record.toJSON(currentAdmin),
++              notice: {
++                message: error instanceof Error ? error.message : 'Could not mark this as completed',
++                type: 'error'
++              }
++            };
++          }
++        }
++      },
++      downloadNewspaperPublicationPdf: {
++        actionType: 'record',
++        icon: 'Download',
++        component: Components.RedirectToManage,
++        isAccessible: ({ currentAdmin, record }) => {
++          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
++          return admin?.role === 'SUPER_ADMIN' && record?.params?.type === 'NEWSPAPER_PUBLICATION';
++        },
++        handler: async (request, response, context) => {
++          const { record, currentAdmin } = context;
++          if (!record) {
++            throw new Error('Missing record');
++          }
++          return { record: record.toJSON(currentAdmin) };
++        }
++      },
+       completeBvnLicense: {
+         actionType: 'record', icon: 'CheckCircle',
+         guard: 'Mark this BVN License request as completed?',
+diff --git a/maria_backend/src/admin/setup.ts b/maria_backend/src/admin/setup.ts
+index adce680..9f40a23 100644
+--- a/maria_backend/src/admin/setup.ts
++++ b/maria_backend/src/admin/setup.ts
+@@ -14,6 +14,8 @@ import { registerUserWalletRoutes } from './user-wallet.js';
+ import { registerCustomerActivityRoutes } from './customer-activity.js';
+ import { registerNinModificationRoutes } from './nin-modification.js';
+ import { registerBvnModificationRoutes } from './bvn-modification.js';
++import { registerBirthAttestationRoutes } from './birth-attestation.js';
++import { registerNewspaperPublicationRoutes } from './newspaper-publication.js';
+ import { registerBvnLicenseRoutes } from './bvn-license-onboarding.js';
+ import { registerCacRoutes } from './cac.js';
+ import { componentLoader, Components } from './component-loader.js';
+@@ -187,6 +189,8 @@ export async function buildAdminRouter() {
+   registerCustomerActivityRoutes(router);
+   registerNinModificationRoutes(router);
+   registerBvnModificationRoutes(router);
++  registerBirthAttestationRoutes(router);
++  registerNewspaperPublicationRoutes(router);
+   registerBvnLicenseRoutes(router);
+   registerCacRoutes(router);
+   registerUserDeliveryRoutes(router);
+diff --git a/maria_backend/src/app.ts b/maria_backend/src/app.ts
+index a65914f..62fdf22 100644
+--- a/maria_backend/src/app.ts
++++ b/maria_backend/src/app.ts
+@@ -35,6 +35,8 @@ import { userRoutes } from './routes/user.routes.js';
+ import { verificationRoutes } from './routes/verification.routes.js';
+ import { ninModificationRoutes } from './routes/nin-modification.routes.js';
+ import { bvnModificationRoutes } from './routes/bvn-modification.routes.js';
++import { birthAttestationRoutes } from './routes/birth-attestation.routes.js';
++import { newspaperPublicationRoutes } from './routes/newspaper-publication.routes.js';
+ import { vtuRoutes } from './routes/vtu.routes.js';
+ import { cableRoutes } from './routes/cable.routes.js';
+ import { electricityRoutes } from './routes/electricity.routes.js';
+@@ -205,6 +207,8 @@ export function createApp() {
+   app.use('/api/verification', verificationRoutes);
+   app.use('/api/nin-modification', ninModificationRoutes);
+   app.use('/api/bvn-modification', bvnModificationRoutes);
++  app.use('/api/birth-attestation', birthAttestationRoutes);
++  app.use('/api/newspaper-publication', newspaperPublicationRoutes);
+   app.use('/api', vtuRoutes);
+   app.use('/api/cable', cableRoutes);
+   app.use('/api/electricity', electricityRoutes);
+diff --git a/maria_backend/src/routes/birth-attestation.routes.ts b/maria_backend/src/routes/birth-attestation.routes.ts
+new file mode 100644
+index 0000000..53a8293
+--- /dev/null
++++ b/maria_backend/src/routes/birth-attestation.routes.ts
+@@ -0,0 +1,100 @@
++import { Router } from 'express';
++import { z, type ZodTypeAny } from 'zod';
++import { requireAuth } from '../middleware/auth.js';
++import { pinField, requirePinConfirmation } from '../lib/require-pin.js';
++import {
++  BIRTH_ATTESTATION_FIELDS,
++  type BirthAttestationField,
++  getBirthAttestationPrice,
++  listBirthAttestationHistory,
++  submitBirthAttestationRequest
++} from '../services/birth-attestation.service.js';
++
++export const birthAttestationRoutes = Router();
++
++birthAttestationRoutes.use(requireAuth);
++
++function idempotencyKeyFrom(req: { header: (name: string) => string | undefined }) {
++  const header = req.header('Idempotency-Key');
++  return header && header.trim().length > 0 ? header.trim() : undefined;
++}
++
++// Same ballpark as nin-modification.routes.ts's MAX_DOCUMENT_BASE64_LENGTH -
++// generous enough for a phone-camera photo compressed to base64 JPEG/PNG,
++// while still bounding what gets stored (encrypted) in one Postgres row.
++const MAX_IMAGE_BASE64_LENGTH = 7_000_000;
++
++function zodFor(field: BirthAttestationField): ZodTypeAny {
++  let schema: ZodTypeAny;
++  switch (field.input) {
++    case 'nin':
++      schema = z.string().trim().length(11, 'Must be exactly 11 digits').regex(/^\d{11}$/, 'Must be 11 digits');
++      break;
++    case 'date':
++      schema = z.string().trim().min(1);
++      break;
++    case 'select':
++      schema = field.options ? z.enum(field.options as [string, ...string[]]) : z.string().trim().min(1);
++      break;
++    case 'image':
++      schema = z
++        .string()
++        .trim()
++        .regex(/^data:image\/(png|jpe?g|webp);base64,/, 'Must be a photo (PNG, JPEG, or WEBP)')
++        .max(MAX_IMAGE_BASE64_LENGTH, 'Photo is too large - please use a smaller image');
++      break;
++    default:
++      schema = z.string().trim().min(1).max(500);
++  }
++  return field.required ? schema : schema.optional().or(z.literal(''));
++}
++
++function buildSchema() {
++  const shape: Record<string, ZodTypeAny> = {};
++  for (const field of BIRTH_ATTESTATION_FIELDS) {
++    shape[field.key] = zodFor(field);
++  }
++  return z.object({ ...shape, ...pinField });
++}
++
++birthAttestationRoutes.get('/fields', (_req, res) => {
++  res.json({
++    status: true,
++    data: BIRTH_ATTESTATION_FIELDS.map((field) => ({
++      key: field.key,
++      label: field.label,
++      required: field.required,
++      input: field.input,
++      options: field.options ?? null,
++      section: field.section ?? null
++    }))
++  });
++});
++
++birthAttestationRoutes.get('/price', async (_req, res) => {
++  const price = await getBirthAttestationPrice();
++  res.json({ status: true, data: { unit_price: price.unitPrice } });
++});
++
++birthAttestationRoutes.get('/history', async (req, res) => {
++  const data = await listBirthAttestationHistory({ userId: req.user!.id });
++  res.set('Cache-Control', 'no-store');
++  res.json({ status: true, data });
++});
++
++birthAttestationRoutes.post('/submit', async (req, res) => {
++  const body = buildSchema().parse(req.body);
++  await requirePinConfirmation(req.user!.id, body.pin);
++  const { pin, ...values } = body as Record<string, unknown> & { pin: string };
++  void pin;
++  const result = await submitBirthAttestationRequest({
++    userId: req.user!.id,
++    values,
++    idempotencyKey: idempotencyKeyFrom(req)
++  });
++  res.json({
++    status: true,
++    message: 'Your Birth Attestation request has been submitted and is being reviewed. You will be notified once it is complete.',
++    data: { reference: result.reference, balance_after: result.balanceAfter }
++  });
++});
+diff --git a/maria_backend/src/routes/newspaper-publication.routes.ts b/maria_backend/src/routes/newspaper-publication.routes.ts
+new file mode 100644
+index 0000000..9fd8c42
+--- /dev/null
++++ b/maria_backend/src/routes/newspaper-publication.routes.ts
+@@ -0,0 +1,65 @@
++import { Router } from 'express';
++import { z, type ZodTypeAny } from 'zod';
++import { requireAuth } from '../middleware/auth.js';
++import { pinField, requirePinConfirmation } from '../lib/require-pin.js';
++import {
++  NEWSPAPER_PUBLICATION_FIELDS,
++  type NewspaperPublicationField,
++  getNewspaperPublicationPrice,
++  listNewspaperPublicationHistory,
++  submitNewspaperPublicationRequest
++} from '../services/newspaper-publication.service.js';
++
++export const newspaperPublicationRoutes = Router();
++
++newspaperPublicationRoutes.use(requireAuth);
++
++function idempotencyKeyFrom(req: { header: (name: string) => string | undefined }) {
++  const header = req.header('Idempotency-Key');
++  return header && header.trim().length > 0 ? header.trim() : undefined;
++}
++
++function zodFor(field: NewspaperPublicationField): ZodTypeAny {
++  const schema = z.string().trim().min(1).max(200);
++  return field.required ? schema : schema.optional().or(z.literal(''));
++}
++
++function buildSchema() {
++  const shape: Record<string, ZodTypeAny> = {};
++  for (const field of NEWSPAPER_PUBLICATION_FIELDS) {
++    shape[field.key] = zodFor(field);
++  }
++  return z.object({ ...shape, ...pinField });
++}
++
++newspaperPublicationRoutes.get('/fields', (_req, res) => {
++  res.json({ status: true, data: NEWSPAPER_PUBLICATION_FIELDS });
++});
++
++newspaperPublicationRoutes.get('/price', async (_req, res) => {
++  const price = await getNewspaperPublicationPrice();
++  res.json({ status: true, data: { unit_price: price.unitPrice } });
++});
++
++newspaperPublicationRoutes.get('/history', async (req, res) => {
++  const data = await listNewspaperPublicationHistory({ userId: req.user!.id });
++  res.set('Cache-Control', 'no-store');
++  res.json({ status: true, data });
++});
++
++newspaperPublicationRoutes.post('/submit', async (req, res) => {
++  const body = buildSchema().parse(req.body);
++  await requirePinConfirmation(req.user!.id, body.pin);
++  const { pin, ...values } = body as Record<string, unknown> & { pin: string };
++  void pin;
++  const result = await submitNewspaperPublicationRequest({
++    userId: req.user!.id,
++    values,
++    idempotencyKey: idempotencyKeyFrom(req)
++  });
++  res.json({
++    status: true,
++    message: 'Your Newspaper Publication request has been submitted and is being reviewed. You will be notified once it is complete.',
++    data: { reference: result.reference, balance_after: result.balanceAfter }
++  });
++});
+diff --git a/maria_backend/src/services/birth-attestation.service.ts b/maria_backend/src/services/birth-attestation.service.ts
+new file mode 100644
+index 0000000..cbc8376
+--- /dev/null
++++ b/maria_backend/src/services/birth-attestation.service.ts
+@@ -0,0 +1,285 @@
++import PDFDocument from 'pdfkit';
++import { Prisma, TransactionStatus, TransactionType } from '@prisma/client';
++import { koboToNaira } from '../lib/money.js';
++import { sealPII, openPII } from '../lib/pii.js';
++import { prisma } from '../lib/prisma.js';
++import { ApiError } from '../middleware/error.js';
++import { debitWallet } from './wallet.service.js';
++
++/**
++ * Birth Attestation — same manual-review pattern as NIN/BVN Modification:
++ * there is no provider API for this (NPC has no developer platform Techhub
++ * exposes), so submitBirthAttestationRequest() debits the wallet, generates
++ * a PDF of exactly what the customer submitted (including the uploaded
++ * photo), and leaves the transaction PENDING. An admin processes the actual
++ * attestation with NPC by hand and, from the Transaction admin page, either
++ * marks it complete (completeBirthAttestation()) or rejects it (the
++ * existing generic "reverse" action, which refunds).
++ *
++ * Unlike NIN/BVN Modification there's only one variant here ("NPC Birth
++ * Attestation & Instant approval") - the reference design's own dropdown
++ * only ever had that one option - so there's no type union, just one fixed
++ * field list.
++ */
++const SERVICE_KEY = 'BIRTH_ATTESTATION';
++const DEFAULT_PRICE = 20000;
++
++export type BirthAttestationFieldInput = 'text' | 'date' | 'nin' | 'select' | 'image';
++
++export type BirthAttestationField = {
++  key: string;
++  label: string;
++  required: boolean;
++  input: BirthAttestationFieldInput;
++  options?: string[];
++  /** Groups fields on the frontend form (e.g. "Father's Details") - purely
++   *  presentational, not used for validation. */
++  section?: string;
++};
++
++// Matches the reference design's own field order/grouping exactly.
++export const BIRTH_ATTESTATION_FIELDS: BirthAttestationField[] = [
++  { key: 'nin', label: 'NIN Number', required: true, input: 'nin', section: 'Applicant' },
++  { key: 'last_name', label: 'Last Name / Surname', required: true, input: 'text', section: 'Applicant' },
++  { key: 'first_name', label: 'First Name', required: true, input: 'text', section: 'Applicant' },
++  { key: 'middle_name', label: 'Middle Name', required: false, input: 'text', section: 'Applicant' },
++  { key: 'old_dob', label: 'Old DoB', required: true, input: 'date', section: 'Applicant' },
++  { key: 'new_dob', label: 'New DoB', required: true, input: 'date', section: 'Applicant' },
++  { key: 'gender', label: 'Gender', required: true, input: 'select', options: ['Male', 'Female'], section: 'Applicant' },
++  { key: 'marital_status', label: 'Marital Status', required: true, input: 'select', options: ['Single', 'Married', 'Divorced'], section: 'Applicant' },
++  { key: 'religion', label: 'Religion', required: true, input: 'text', section: 'Applicant' },
++
++  { key: 'state_of_origin', label: 'State of Origin', required: true, input: 'text', section: 'Origin & Birth' },
++  { key: 'lga_of_origin', label: 'LGA of Origin', required: true, input: 'text', section: 'Origin & Birth' },
++  { key: 'town_village_of_origin', label: 'Town/Village of Origin', required: true, input: 'text', section: 'Origin & Birth' },
++  { key: 'place_of_birth', label: 'Place of Birth', required: true, input: 'text', section: 'Origin & Birth' },
++  { key: 'state_of_birth', label: 'State of Birth', required: true, input: 'text', section: 'Origin & Birth' },
++  { key: 'lga_of_birth', label: 'LGA of Birth', required: true, input: 'text', section: 'Origin & Birth' },
++
++  { key: 'birth_registration_state', label: 'Birth Registration State (Resident state)', required: true, input: 'text', section: 'Registration' },
++  { key: 'birth_registration_lga', label: 'Birth Registration LGA (Resident LGA)', required: true, input: 'text', section: 'Registration' },
++  { key: 'registration_center', label: 'Registration Center (Nearest to you)', required: true, input: 'text', section: 'Registration' },
++
++  { key: 'current_house_address', label: 'Full Current House Address', required: true, input: 'text', section: 'Address & Background' },
++  { key: 'work_address', label: 'Full Work Address', required: true, input: 'text', section: 'Address & Background' },
++  { key: 'education_level', label: 'Highest Level of Education', required: true, input: 'text', section: 'Address & Background' },
++  { key: 'occupation', label: 'Occupation', required: true, input: 'text', section: 'Address & Background' },
++
++  { key: 'father_surname', label: "Father's Surname", required: true, input: 'text', section: "Father's Details" },
++  { key: 'father_first_name', label: "Father's First Name", required: true, input: 'text', section: "Father's Details" },
++  { key: 'father_middle_name', label: "Father's Middle Name", required: false, input: 'text', section: "Father's Details" },
++  { key: 'father_state_of_origin', label: "Father's State of Origin", required: true, input: 'text', section: "Father's Details" },
++  { key: 'father_lga_of_origin', label: "Father's LGA of Origin", required: true, input: 'text', section: "Father's Details" },
++  { key: 'father_town_village_of_origin', label: "Father's Town/Village of Origin", required: true, input: 'text', section: "Father's Details" },
++
++  { key: 'mother_surname', label: "Mother's Surname", required: true, input: 'text', section: "Mother's Details" },
++  { key: 'mother_first_name', label: "Mother's First Name", required: true, input: 'text', section: "Mother's Details" },
++  { key: 'mother_maiden_name', label: "Mother's Maiden Name", required: true, input: 'text', section: "Mother's Details" },
++  { key: 'mother_state_of_origin', label: "Mother's State of Origin", required: true, input: 'text', section: "Mother's Details" },
++  { key: 'mother_lga_of_origin', label: "Mother's LGA of Origin", required: true, input: 'text', section: "Mother's Details" },
++  { key: 'mother_town_village_of_origin', label: "Mother's Town/Village of Origin", required: true, input: 'text', section: "Mother's Details" },
++
++  { key: 'clean_picture', label: 'Upload Clean Picture', required: true, input: 'image', section: 'Photo' }
++];
++
++function priceToKobo(amount: number) {
++  return BigInt(Math.round(amount * 100));
++}
++
++/** Same plain-findUnique-then-conditional-create shape used throughout -
++ *  never resets an admin's already-configured price back to the default. */
++async function getOrCreatePricingRow() {
++  const existing = await prisma.servicePricing.findUnique({ where: { service: SERVICE_KEY } });
++  if (existing) return existing;
++
++  try {
++    return await prisma.servicePricing.create({
++      data: {
++        service: SERVICE_KEY,
++        provider: 'manual',
++        label: 'Birth Attestation \u2014 NPC Birth Attestation & Instant approval',
++        providerCostKobo: priceToKobo(DEFAULT_PRICE)
++      }
++    });
++  } catch (error) {
++    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
++      return prisma.servicePricing.findUniqueOrThrow({ where: { service: SERVICE_KEY } });
++    }
++    throw error;
++  }
++}
++
++export async function getBirthAttestationPrice() {
++  const row = await getOrCreatePricingRow();
++  if (!row.isActive) {
++    throw new ApiError(422, `${row.label} is currently unavailable`, 'SERVICE_INACTIVE');
++  }
++  const unitKobo = row.sellingPriceKobo ?? row.providerCostKobo;
++  return { unitPrice: koboToNaira(unitKobo), providerCostKobo: row.providerCostKobo };
++}
++
++/** Renders exactly what the customer submitted into a PDF - the document an
++ *  admin opens to manually process the attestation with NPC, and the copy
++ *  the customer can re-download from their own history. */
++function renderBirthAttestationPdf(params: { reference: string; values: Record<string, unknown>; submittedAt: Date }): Promise<string> {
++  return new Promise((resolve, reject) => {
++    const doc = new PDFDocument({ size: 'A4', margin: 50 });
++    const chunks: Buffer[] = [];
++    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
++    doc.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
++    doc.on('error', reject);
++
++    doc.fontSize(16).font('Helvetica-Bold').text('MARIA Digital Solutions \u2014 Birth Attestation Request', { align: 'center' });
++    doc.moveDown(0.3);
++    doc.fontSize(11).font('Helvetica').fillColor('#555').text('NPC Birth Attestation & Instant approval', { align: 'center' });
++    doc.moveDown(1);
++    doc.fillColor('#000');
++
++    doc.fontSize(10).font('Helvetica-Bold').text('Reference: ', { continued: true }).font('Helvetica').text(params.reference);
++    doc.font('Helvetica-Bold').text('Submitted: ', { continued: true }).font('Helvetica').text(params.submittedAt.toISOString());
++    doc.moveDown(1);
++
++    let currentSection = '';
++    for (const field of BIRTH_ATTESTATION_FIELDS) {
++      // The photo is embedded as an actual image further down, never
++      // printed as a wall of base64 text.
++      if (field.input === 'image') continue;
++
++      if (field.section && field.section !== currentSection) {
++        currentSection = field.section;
++        doc.moveDown(0.6);
++        doc.font('Helvetica-Bold').fontSize(11).fillColor('#0b2f73').text(currentSection);
++        doc.fillColor('#000');
++        doc.moveTo(50, doc.y + 2).lineTo(545, doc.y + 2).strokeColor('#ddd').stroke();
++        doc.moveDown(0.4);
++      }
++
++      const raw = params.values[field.key];
++      const value = raw === undefined || raw === null || raw === '' ? '\u2014' : String(raw);
++      doc.font('Helvetica-Bold').fontSize(9.5).text(`${field.label}: `, { continued: true });
++      doc.font('Helvetica').text(value);
++    }
++
++    const imageField = BIRTH_ATTESTATION_FIELDS.find((f) => f.input === 'image');
++    if (imageField) {
++      const raw = params.values[imageField.key];
++      if (typeof raw === 'string' && raw.startsWith('data:image/')) {
++        try {
++          const base64 = raw.slice(raw.indexOf(',') + 1);
++          const buffer = Buffer.from(base64, 'base64');
++          doc.moveDown(0.6);
++          doc.font('Helvetica-Bold').fontSize(10).text(`${imageField.label}:`);
++          doc.moveDown(0.3);
++          doc.image(buffer, { fit: [240, 240] });
++        } catch {
++          doc.font('Helvetica').fontSize(9).fillColor('#a00').text(`${imageField.label}: could not be embedded (invalid image data)`);
++        }
++      }
++    }
++
++    doc.moveDown(1.5);
++    doc
++      .fontSize(8)
++      .fillColor('#888')
++      .text('This is a submission record only, not an NPC-issued document. Processed manually by an admin.', { align: 'left' });
++
++    doc.end();
++  });
++}
++
++export type SubmitBirthAttestationResult = { reference: string; balanceAfter: number };
++
++export async function submitBirthAttestationRequest(params: {
++  userId: string;
++  values: Record<string, unknown>;
++  idempotencyKey?: string;
++}): Promise<SubmitBirthAttestationResult> {
++  const price = await getBirthAttestationPrice();
++
++  const debit = await debitWallet({
++    userId: params.userId,
++    amount: price.unitPrice,
++    type: TransactionType.BIRTH_ATTESTATION,
++    description: 'Birth Attestation \u2014 NPC Birth Attestation & Instant approval',
++    metadata: {
++      service: SERVICE_KEY,
++      unit_price: price.unitPrice,
++      pii: sealPII(params.values)
++    } as Prisma.InputJsonValue,
++    idempotencyKey: params.idempotencyKey,
++    // No provider was actually paid yet - an admin processes this by hand with NPC.
++    costKobo: price.providerCostKobo
++  });
++
++  if (debit.reused) {
++    return { reference: debit.reference, balanceAfter: debit.balanceAfter };
++  }
++
++  const pdfBase64 = await renderBirthAttestationPdf({
++    reference: debit.reference,
++    values: params.values,
++    submittedAt: debit.transaction.createdAt
++  });
++
++  await prisma.transaction.update({
++    where: { id: debit.transaction.id },
++    data: {
++      metadata: {
++        service: SERVICE_KEY,
++        unit_price: price.unitPrice,
++        pii: sealPII({ ...params.values, pdf_base64: pdfBase64 })
++      } as Prisma.InputJsonValue
++    }
++  });
++
++  return { reference: debit.reference, balanceAfter: debit.balanceAfter };
++}
++
++export type BirthAttestationHistoryEntry = { reference: string; status: string; created_at: string; pdf_base64: string | null };
++
++export async function listBirthAttestationHistory(params: { userId: string }) {
++  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
++  const transactions = await prisma.transaction.findMany({
++    where: {
++      userId: params.userId,
++      type: TransactionType.BIRTH_ATTESTATION,
++      status: TransactionStatus.SUCCESS,
++      updatedAt: { gte: since }
++    },
++    orderBy: { updatedAt: 'desc' },
++    take: 20
++  });
++
++  return transactions.map((transaction): BirthAttestationHistoryEntry => {
++    const metadata = transaction.metadata as Record<string, unknown> | null;
++    const pii = openPII<{ pdf_base64?: string }>(metadata?.pii);
++    return {
++      reference: transaction.reference,
++      status: transaction.status.toLowerCase(),
++      created_at: transaction.updatedAt.toISOString(),
++      pdf_base64: typeof pii?.pdf_base64 === 'string' ? pii.pdf_base64 : null
++    };
++  });
++}
++
++/** Called from the "Complete Birth Attestation" admin action once NPC has
++ *  actually processed it. No wallet movement - the customer was already
++ *  charged at submit time. Rejection uses the existing generic
++ *  refundWallet()/"reverse" admin action. */
++export async function completeBirthAttestation(params: { transactionId: string }) {
++  const transaction = await prisma.transaction.findUnique({ where: { id: params.transactionId } });
++  if (!transaction || transaction.type !== TransactionType.BIRTH_ATTESTATION) {
++    throw new ApiError(404, 'Birth Attestation transaction not found', 'TRANSACTION_NOT_FOUND');
++  }
++  if (transaction.status !== TransactionStatus.PENDING) {
++    throw new ApiError(422, 'Only a pending request can be marked complete', 'INVALID_STATUS');
++  }
++  return prisma.transaction.update({ where: { id: transaction.id }, data: { status: TransactionStatus.SUCCESS } });
++}
++
++/** Decrypts the sealed PII (including the generated PDF) for the admin's
++ *  PDF-download route. Never call this from a user-facing endpoint. */
++export function decryptBirthAttestationPII(transaction: { metadata: unknown }) {
++  const metadata = transaction.metadata as Record<string, unknown> | null;
++  return openPII<Record<string, unknown> & { pdf_base64?: string }>(metadata?.pii);
++}
+diff --git a/maria_backend/src/services/newspaper-publication.service.ts b/maria_backend/src/services/newspaper-publication.service.ts
+new file mode 100644
+index 0000000..225d7f6
+--- /dev/null
++++ b/maria_backend/src/services/newspaper-publication.service.ts
+@@ -0,0 +1,211 @@
++import PDFDocument from 'pdfkit';
++import { Prisma, TransactionStatus, TransactionType } from '@prisma/client';
++import { koboToNaira } from '../lib/money.js';
++import { sealPII, openPII } from '../lib/pii.js';
++import { prisma } from '../lib/prisma.js';
++import { ApiError } from '../middleware/error.js';
++import { debitWallet } from './wallet.service.js';
++
++/**
++ * Newspaper Publication (name-change notice) — same manual-review pattern
++ * as Birth Attestation/NIN/BVN Modification: no provider API (this is an
++ * actual print-newspaper affidavit + publication placed by an admin with
++ * BluePrint or DailyTrust), so submitNewspaperPublicationRequest() debits
++ * the wallet, generates a PDF of exactly what the customer submitted, and
++ * leaves the transaction PENDING for an admin to place the publication and
++ * upload the completed cutting/certificate, then mark it complete.
++ *
++ * Only one variant, matching the reference design's own single dropdown
++ * option: "Name only or Name & DoB Publication (BluePrint or DailyTrust
++ * only)" - submit before 5:30pm Monday to Friday only, ~20hr duration.
++ */
++const SERVICE_KEY = 'NEWSPAPER_PUBLICATION';
++const DEFAULT_PRICE = 3300;
++
++export type NewspaperPublicationField = { key: string; label: string; required: boolean };
++
++export const NEWSPAPER_PUBLICATION_FIELDS: NewspaperPublicationField[] = [
++  { key: 'old_first_name', label: 'Old First Name', required: true },
++  { key: 'old_last_name', label: 'Old Last Name / Surname', required: true },
++  { key: 'old_middle_name', label: 'Old Middle Name', required: false },
++  { key: 'new_first_name', label: 'New First Name', required: true },
++  { key: 'new_last_name', label: 'New Last Name / Surname', required: true },
++  { key: 'new_middle_name', label: 'New Middle Name', required: false }
++];
++
++function priceToKobo(amount: number) {
++  return BigInt(Math.round(amount * 100));
++}
++
++async function getOrCreatePricingRow() {
++  const existing = await prisma.servicePricing.findUnique({ where: { service: SERVICE_KEY } });
++  if (existing) return existing;
++
++  try {
++    return await prisma.servicePricing.create({
++      data: {
++        service: SERVICE_KEY,
++        provider: 'manual',
++        label: 'Newspaper Publication \u2014 Name only or Name & DoB (BluePrint/DailyTrust)',
++        providerCostKobo: priceToKobo(DEFAULT_PRICE)
++      }
++    });
++  } catch (error) {
++    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
++      return prisma.servicePricing.findUniqueOrThrow({ where: { service: SERVICE_KEY } });
++    }
++    throw error;
++  }
++}
++
++export async function getNewspaperPublicationPrice() {
++  const row = await getOrCreatePricingRow();
++  if (!row.isActive) {
++    throw new ApiError(422, `${row.label} is currently unavailable`, 'SERVICE_INACTIVE');
++  }
++  const unitKobo = row.sellingPriceKobo ?? row.providerCostKobo;
++  return { unitPrice: koboToNaira(unitKobo), providerCostKobo: row.providerCostKobo };
++}
++
++function renderNewspaperPublicationPdf(params: { reference: string; values: Record<string, unknown>; submittedAt: Date }): Promise<string> {
++  return new Promise((resolve, reject) => {
++    const doc = new PDFDocument({ size: 'A4', margin: 50 });
++    const chunks: Buffer[] = [];
++    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
++    doc.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
++    doc.on('error', reject);
++
++    doc.fontSize(16).font('Helvetica-Bold').text('MARIA Digital Solutions \u2014 Newspaper Publication Request', { align: 'center' });
++    doc.moveDown(0.3);
++    doc
++      .fontSize(10)
++      .font('Helvetica')
++      .fillColor('#555')
++      .text('Name only or Name & DoB Publication (BluePrint or DailyTrust only)', { align: 'center' });
++    doc.moveDown(1);
++    doc.fillColor('#000');
++
++    doc.fontSize(10).font('Helvetica-Bold').text('Reference: ', { continued: true }).font('Helvetica').text(params.reference);
++    doc.font('Helvetica-Bold').text('Submitted: ', { continued: true }).font('Helvetica').text(params.submittedAt.toISOString());
++    doc.moveDown(1);
++    doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#ccc').stroke();
++    doc.moveDown(1);
++
++    doc.font('Helvetica-Bold').fontSize(11).fillColor('#0b2f73').text('Old Details');
++    doc.fillColor('#000').moveDown(0.4);
++    for (const field of NEWSPAPER_PUBLICATION_FIELDS.filter((f) => f.key.startsWith('old_'))) {
++      const raw = params.values[field.key];
++      const value = raw === undefined || raw === null || raw === '' ? '\u2014' : String(raw);
++      doc.font('Helvetica-Bold').fontSize(9.5).text(`${field.label}: `, { continued: true });
++      doc.font('Helvetica').text(value);
++    }
++
++    doc.moveDown(0.6);
++    doc.font('Helvetica-Bold').fontSize(11).fillColor('#0b2f73').text('New Details');
++    doc.fillColor('#000').moveDown(0.4);
++    for (const field of NEWSPAPER_PUBLICATION_FIELDS.filter((f) => f.key.startsWith('new_'))) {
++      const raw = params.values[field.key];
++      const value = raw === undefined || raw === null || raw === '' ? '\u2014' : String(raw);
++      doc.font('Helvetica-Bold').fontSize(9.5).text(`${field.label}: `, { continued: true });
++      doc.font('Helvetica').text(value);
++    }
++
++    doc.moveDown(1.5);
++    doc
++      .fontSize(8)
++      .fillColor('#888')
++      .text('This is a submission record only, not the published newspaper cutting/affidavit. Processed manually by an admin.', { align: 'left' });
++
++    doc.end();
++  });
++}
++
++export type SubmitNewspaperPublicationResult = { reference: string; balanceAfter: number };
++
++export async function submitNewspaperPublicationRequest(params: {
++  userId: string;
++  values: Record<string, unknown>;
++  idempotencyKey?: string;
++}): Promise<SubmitNewspaperPublicationResult> {
++  const price = await getNewspaperPublicationPrice();
++
++  const debit = await debitWallet({
++    userId: params.userId,
++    amount: price.unitPrice,
++    type: TransactionType.NEWSPAPER_PUBLICATION,
++    description: 'Newspaper Publication \u2014 Name Change',
++    metadata: {
++      service: SERVICE_KEY,
++      unit_price: price.unitPrice,
++      pii: sealPII(params.values)
++    } as Prisma.InputJsonValue,
++    idempotencyKey: params.idempotencyKey,
++    costKobo: price.providerCostKobo
++  });
++
++  if (debit.reused) {
++    return { reference: debit.reference, balanceAfter: debit.balanceAfter };
++  }
++
++  const pdfBase64 = await renderNewspaperPublicationPdf({
++    reference: debit.reference,
++    values: params.values,
++    submittedAt: debit.transaction.createdAt
++  });
++
++  await prisma.transaction.update({
++    where: { id: debit.transaction.id },
++    data: {
++      metadata: {
++        service: SERVICE_KEY,
++        unit_price: price.unitPrice,
++        pii: sealPII({ ...params.values, pdf_base64: pdfBase64 })
++      } as Prisma.InputJsonValue
++    }
++  });
++
++  return { reference: debit.reference, balanceAfter: debit.balanceAfter };
++}
++
++export type NewspaperPublicationHistoryEntry = { reference: string; status: string; created_at: string; pdf_base64: string | null };
++
++export async function listNewspaperPublicationHistory(params: { userId: string }) {
++  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
++  const transactions = await prisma.transaction.findMany({
++    where: {
++      userId: params.userId,
++      type: TransactionType.NEWSPAPER_PUBLICATION,
++      status: TransactionStatus.SUCCESS,
++      updatedAt: { gte: since }
++    },
++    orderBy: { updatedAt: 'desc' },
++    take: 20
++  });
++
++  return transactions.map((transaction): NewspaperPublicationHistoryEntry => {
++    const metadata = transaction.metadata as Record<string, unknown> | null;
++    const pii = openPII<{ pdf_base64?: string }>(metadata?.pii);
++    return {
++      reference: transaction.reference,
++      status: transaction.status.toLowerCase(),
++      created_at: transaction.updatedAt.toISOString(),
++      pdf_base64: typeof pii?.pdf_base64 === 'string' ? pii.pdf_base64 : null
++    };
++  });
++}
++
++export async function completeNewspaperPublication(params: { transactionId: string }) {
++  const transaction = await prisma.transaction.findUnique({ where: { id: params.transactionId } });
++  if (!transaction || transaction.type !== TransactionType.NEWSPAPER_PUBLICATION) {
++    throw new ApiError(404, 'Newspaper Publication transaction not found', 'TRANSACTION_NOT_FOUND');
++  }
++  if (transaction.status !== TransactionStatus.PENDING) {
++    throw new ApiError(422, 'Only a pending request can be marked complete', 'INVALID_STATUS');
++  }
++  return prisma.transaction.update({ where: { id: transaction.id }, data: { status: TransactionStatus.SUCCESS } });
++}
++
++export function decryptNewspaperPublicationPII(transaction: { metadata: unknown }) {
++  const metadata = transaction.metadata as Record<string, unknown> | null;
++  return openPII<Record<string, unknown> & { pdf_base64?: string }>(metadata?.pii);
++}
+diff --git a/web/src/App.tsx b/web/src/App.tsx
+index d8b18e6..9121efa 100644
+--- a/web/src/App.tsx
++++ b/web/src/App.tsx
+@@ -28,6 +28,8 @@ import BvnLicensePage from './pages/verification/BvnLicensePage';
+ import DemographicVerificationPage from './pages/verification/DemographicVerificationPage';
+ import NinModificationPage from './pages/NinModificationPage';
+ import BvnModificationPage from './pages/BvnModificationPage';
++import BirthAttestationPage from './pages/BirthAttestationPage';
++import NewspaperPublicationPage from './pages/NewspaperPublicationPage';
+ import FundWalletPage from './pages/FundWalletPage';
+ import PaymentCallbackPage from './pages/PaymentCallbackPage';
+ import DeliveriesPage from './pages/DeliveriesPage';
+@@ -91,6 +93,8 @@ export default function App() {
+           <Route path="/validation" element={<ProtectedRoute><ValidationPage /></ProtectedRoute>} />
+           <Route path="/nin-modification" element={<ProtectedRoute><NinModificationPage /></ProtectedRoute>} />
+           <Route path="/bvn-modification" element={<ProtectedRoute><BvnModificationPage /></ProtectedRoute>} />
++          <Route path="/attestation" element={<ProtectedRoute><BirthAttestationPage /></ProtectedRoute>} />
++          <Route path="/newspaper" element={<ProtectedRoute><NewspaperPublicationPage /></ProtectedRoute>} />
+           <Route path="/modification" element={<ProtectedRoute><NinModificationPage /></ProtectedRoute>} />
+           <Route path="/tracking" element={<ProtectedRoute><PersonalizationPage /></ProtectedRoute>} />
+           <Route path="/delink" element={<ProtectedRoute><DelinkPage /></ProtectedRoute>} />
+diff --git a/web/src/lib/services.ts b/web/src/lib/services.ts
+index f75a21d..53e7baf 100644
+--- a/web/src/lib/services.ts
++++ b/web/src/lib/services.ts
+@@ -60,9 +60,9 @@ export const SERVICES: ServiceItem[] = [
+   // "/" with no explanation. `false` correctly routes them through the
+   // SERVICES.filter(!implemented) loop below to the friendly
+   // "coming soon" page instead.
+-  { label: 'Birth Attestation', description: 'Birth attestation services.', icon: Receipt, route: '/attestation', tint: 'success', implemented: false },
++  { label: 'Birth Attestation', description: 'Birth attestation services.', icon: Receipt, route: '/attestation', tint: 'success', implemented: true },
+   { label: 'TIN Certificate', description: 'Get your TIN certificate.', icon: Receipt, route: '/tin', tint: 'ember', implemented: false },
+-  { label: 'Newspaper Publication', description: 'Publish notices in newspapers.', icon: MessageSquare, route: '/newspaper', tint: 'gold', implemented: false },
++  { label: 'Newspaper Publication', description: 'Publish notices in newspapers.', icon: MessageSquare, route: '/newspaper', tint: 'gold', implemented: true },
+   { label: 'Demographic Search', description: 'Search demographic records.', icon: Search, route: '/demo', tint: 'bronze', implemented: true },
+   // These two now have real dedicated pages + <Route> entries in App.tsx
+   // (BvnLicensePage, BvnModificationPage). Leaving `implemented: false`
+diff --git a/web/src/pages/BirthAttestationPage.tsx b/web/src/pages/BirthAttestationPage.tsx
+new file mode 100644
+index 0000000..9afc0b0
+--- /dev/null
++++ b/web/src/pages/BirthAttestationPage.tsx
+@@ -0,0 +1,277 @@
++import { useEffect, useMemo, useState, type FormEvent } from 'react';
++import { useNavigate } from 'react-router-dom';
++import { Download, Loader2 } from 'lucide-react';
++import AppShell from '../components/AppShell';
++import { api, ApiError } from '../lib/api';
++import { PinConfirmDialog } from '../components/PinConfirmDialog';
++import { PageHeader, FORM_SECTION_CLASSES, FORM_INPUT_CLASSES, FORM_LABEL_CLASSES, FORM_HELP_CLASSES, money } from '../components/verification/shared';
++
++type FieldInput = 'text' | 'date' | 'nin' | 'select' | 'image';
++type Field = { key: string; label: string; required: boolean; input: FieldInput; options: string[] | null; section: string | null };
++type HistoryEntry = { reference: string; status: string; created_at: string; pdf_base64: string | null };
++
++const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4MB raw file - keeps the base64'd body comfortably under the backend's 8mb JSON limit
++
++function readImageAsDataUrl(file: File): Promise<string> {
++  return new Promise((resolve, reject) => {
++    const reader = new FileReader();
++    reader.onload = () => resolve(reader.result as string);
++    reader.onerror = () => reject(reader.error ?? new Error('Could not read file'));
++    reader.readAsDataURL(file);
++  });
++}
++
++export default function BirthAttestationPage() {
++  const nav = useNavigate();
++  const [fields, setFields] = useState<Field[]>([]);
++  const [price, setPrice] = useState<number | undefined>(undefined);
++  const [values, setValues] = useState<Record<string, string>>({});
++  const [imageErrors, setImageErrors] = useState<Record<string, string>>({});
++  const [consent, setConsent] = useState(false);
++  const [showPin, setShowPin] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const [message, setMessage] = useState('');
++  const [reference, setReference] = useState('');
++  const [history, setHistory] = useState<HistoryEntry[]>([]);
++  const [loadingHistory, setLoadingHistory] = useState(true);
++
++  useEffect(() => {
++    Promise.all([api.get<{ data: Field[] }>('/birth-attestation/fields'), api.get<{ data: { unit_price: number } }>('/birth-attestation/price')])
++      .then(([fieldsRes, priceRes]) => {
++        setFields(fieldsRes.data);
++        setPrice(priceRes.data.unit_price);
++      })
++      .catch(() => setMessage('Unable to load this form. Please refresh and try again.'));
++    loadHistory();
++  }, []);
++
++  async function loadHistory() {
++    setLoadingHistory(true);
++    try {
++      const result = await api.get<{ data: HistoryEntry[] }>('/birth-attestation/history');
++      setHistory(result.data ?? []);
++    } catch {
++      setHistory([]);
++    } finally {
++      setLoadingHistory(false);
++    }
++  }
++
++  const sections = useMemo(() => {
++    const order: string[] = [];
++    const byName: Record<string, Field[]> = {};
++    for (const field of fields) {
++      const name = field.section ?? '';
++      if (!byName[name]) {
++        byName[name] = [];
++        order.push(name);
++      }
++      byName[name].push(field);
++    }
++    return order.map((name) => ({ name, fields: byName[name] }));
++  }, [fields]);
++
++  async function handleImageSelect(fieldKey: string, file: File | undefined) {
++    if (!file) return;
++    if (!file.type.startsWith('image/')) {
++      setImageErrors((e) => ({ ...e, [fieldKey]: 'Please choose an image file (PNG, JPEG, or WEBP).' }));
++      return;
++    }
++    if (file.size > MAX_IMAGE_BYTES) {
++      setImageErrors((e) => ({ ...e, [fieldKey]: 'That photo is too large - please use one under 4MB.' }));
++      return;
++    }
++    try {
++      const dataUrl = await readImageAsDataUrl(file);
++      setValues((v) => ({ ...v, [fieldKey]: dataUrl }));
++      setImageErrors((e) => ({ ...e, [fieldKey]: '' }));
++    } catch {
++      setImageErrors((e) => ({ ...e, [fieldKey]: 'Could not read that file - please try again.' }));
++    }
++  }
++
++  function prepare(event: FormEvent) {
++    event.preventDefault();
++    if (!consent) {
++      setMessage('Please check the consent box before continuing.');
++      return;
++    }
++    const missingImage = fields.find((f) => f.input === 'image' && f.required && !values[f.key]);
++    if (missingImage) {
++      setMessage(`Please attach a photo for "${missingImage.label}" before continuing.`);
++      return;
++    }
++    setMessage('');
++    setShowPin(true);
++  }
++
++  async function submit(pin: string) {
++    setShowPin(false);
++    setBusy(true);
++    setMessage('');
++    try {
++      const body: Record<string, string> = { ...values, pin };
++      const result = await api.post<{ status: boolean; message: string; data: { reference: string } }>('/birth-attestation/submit', body);
++      setReference(result.data.reference);
++      setMessage(result.message);
++      setValues({});
++      setConsent(false);
++      void loadHistory();
++    } catch (error) {
++      setMessage(error instanceof ApiError ? error.message : 'Request failed. Please try again.');
++    } finally {
++      setBusy(false);
++    }
++  }
++
++  return (
++    <AppShell>
++      <div className="mx-auto max-w-5xl">
++        <button onClick={() => nav('/dashboard')} className="font-body text-sm font-semibold text-[#0b2f73]">
++          ← Dashboard
++        </button>
++
++        <PageHeader
++          title="Birth Attestation"
++          subtitle="NPC Birth Attestation & Instant approval. Requests are reviewed and processed by an agent - modifications between 1 day and 5 years are allowed."
++        />
++
++        <section className={FORM_SECTION_CLASSES}>
++          <div className="flex flex-wrap items-center justify-between gap-3">
++            <h2 className="font-display text-lg font-bold text-[#0b2f73]">NPC Birth Attestation &amp; Instant approval</h2>
++            <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">Service cost: {money(price)}</span>
++          </div>
++
++          {!reference ? (
++            <form onSubmit={prepare} className="mt-5 space-y-8">
++              {sections.map((section) => (
++                <div key={section.name}>
++                  {section.name && <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wide text-[#0b2f73]/70">{section.name}</h3>}
++                  <div className="grid gap-4 sm:grid-cols-2">
++                    {section.fields.map((field) => (
++                      <label key={field.key} className={field.input === 'image' ? `${FORM_LABEL_CLASSES} sm:col-span-2` : FORM_LABEL_CLASSES}>
++                        {field.label}
++                        {!field.required && <span className="ml-1 text-xs font-normal text-[#0b2f73]/40">(optional)</span>}
++                        {field.input === 'select' ? (
++                          <select
++                            required={field.required}
++                            className={`mt-1 ${FORM_INPUT_CLASSES}`}
++                            value={values[field.key] ?? ''}
++                            onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
++                          >
++                            <option value="">-- Select {field.label} --</option>
++                            {field.options?.map((opt) => (
++                              <option key={opt} value={opt}>
++                                {opt}
++                              </option>
++                            ))}
++                          </select>
++                        ) : field.input === 'image' ? (
++                          <div className="mt-1">
++                            {values[field.key] ? (
++                              <div className="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50 p-2">
++                                <img src={values[field.key]} alt={field.label} className="h-16 w-16 rounded-lg object-cover" />
++                                <div className="flex-1">
++                                  <p className="font-body text-xs text-[#0b2f73]">Photo selected</p>
++                                  <label className="cursor-pointer font-body text-xs font-semibold text-[#0b2f73] underline">
++                                    Change photo
++                                    <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => void handleImageSelect(field.key, e.target.files?.[0])} />
++                                  </label>
++                                </div>
++                                <button type="button" onClick={() => setValues((v) => ({ ...v, [field.key]: '' }))} className="font-body text-xs font-semibold text-rose-600">
++                                  Remove
++                                </button>
++                              </div>
++                            ) : (
++                              <label className={`flex cursor-pointer items-center justify-center rounded-xl border border-dashed p-4 text-center ${FORM_INPUT_CLASSES}`}>
++                                <span className="font-body text-xs text-[#0b2f73]/70">Tap to take a photo or upload one from your device</span>
++                                <input
++                                  required={field.required}
++                                  type="file"
++                                  accept="image/png,image/jpeg,image/webp"
++                                  className="hidden"
++                                  onChange={(e) => void handleImageSelect(field.key, e.target.files?.[0])}
++                                />
++                              </label>
++                            )}
++                            {imageErrors[field.key] && <p className="mt-1 font-body text-xs text-rose-600">{imageErrors[field.key]}</p>}
++                          </div>
++                        ) : (
++                          <input
++                            required={field.required}
++                            type={field.input === 'date' ? 'date' : field.input === 'nin' ? 'tel' : 'text'}
++                            inputMode={field.input === 'nin' ? 'numeric' : undefined}
++                            maxLength={field.input === 'nin' ? 11 : undefined}
++                            className={`mt-1 ${FORM_INPUT_CLASSES}`}
++                            value={values[field.key] ?? ''}
++                            onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
++                          />
++                        )}
++                      </label>
++                    ))}
++                  </div>
++                </div>
++              ))}
++
++              <label className="flex items-start gap-2 font-body text-sm text-[#0b2f73]">
++                <input type="checkbox" className="mt-0.5" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
++                By checking this box, you agree that the owner of the ID has granted you consent to verify his/her identity.
++              </label>
++
++              <div>
++                <button
++                  disabled={busy}
++                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b2f73] py-3 font-display font-semibold text-white disabled:opacity-60 sm:w-auto sm:px-8"
++                >
++                  {busy ? <Loader2 size={16} className="animate-spin" /> : 'Continue to PIN confirmation'}
++                </button>
++                {message && <p className="mt-3 rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>}
++              </div>
++            </form>
++          ) : (
++            <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-center">
++              <p className="font-body text-sm font-semibold text-emerald-800">{message}</p>
++              <p className="mt-1 font-body text-xs text-emerald-700">Reference: {reference}</p>
++              <button onClick={() => setReference('')} className="mt-4 rounded-xl bg-[#0b2f73] px-5 py-2.5 font-display text-sm font-semibold text-white">
++                Submit another request
++              </button>
++            </div>
++          )}
++
++          <div className="mt-8">
++            <h3 className={FORM_LABEL_CLASSES}>Recent requests</h3>
++            {loadingHistory ? (
++              <p className={`mt-2 ${FORM_HELP_CLASSES}`}>Loading…</p>
++            ) : history.length === 0 ? (
++              <p className={`mt-2 ${FORM_HELP_CLASSES}`}>No requests yet.</p>
++            ) : (
++              <ul className="mt-2 space-y-2">
++                {history.map((entry) => (
++                  <li key={entry.reference} className="flex items-center justify-between rounded-xl border border-blue-100 bg-blue-50 p-3 font-body text-xs text-[#0b2f73]">
++                    <span>
++                      {entry.reference} · {new Date(entry.created_at).toLocaleString()} ·{' '}
++                      <span
++                        className={
++                          entry.status === 'success' ? 'font-semibold text-emerald-700' : entry.status === 'failed' ? 'font-semibold text-rose-600' : 'font-semibold text-amber-600'
++                        }
++                      >
++                        {entry.status === 'pending' ? 'Under review' : entry.status}
++                      </span>
++                    </span>
++                    {entry.pdf_base64 && (
++                      <a href={`data:application/pdf;base64,${entry.pdf_base64}`} download={`${entry.reference}.pdf`} className="flex items-center gap-1 font-semibold text-[#0b2f73]">
++                        <Download size={12} /> PDF
++                      </a>
++                    )}
++                  </li>
++                ))}
++              </ul>
++            )}
++          </div>
++        </section>
++      </div>
++
++      <PinConfirmDialog open={showPin} onClose={() => setShowPin(false)} onVerified={submit} />
++    </AppShell>
++  );
++}
+diff --git a/web/src/pages/NewspaperPublicationPage.tsx b/web/src/pages/NewspaperPublicationPage.tsx
+new file mode 100644
+index 0000000..f55743e
+--- /dev/null
++++ b/web/src/pages/NewspaperPublicationPage.tsx
+@@ -0,0 +1,194 @@
++import { useEffect, useState, type FormEvent } from 'react';
++import { useNavigate } from 'react-router-dom';
++import { Download, Loader2 } from 'lucide-react';
++import AppShell from '../components/AppShell';
++import { api, ApiError } from '../lib/api';
++import { PinConfirmDialog } from '../components/PinConfirmDialog';
++import { PageHeader, FORM_SECTION_CLASSES, FORM_INPUT_CLASSES, FORM_LABEL_CLASSES, FORM_HELP_CLASSES, money } from '../components/verification/shared';
++
++type Field = { key: string; label: string; required: boolean };
++type HistoryEntry = { reference: string; status: string; created_at: string; pdf_base64: string | null };
++
++export default function NewspaperPublicationPage() {
++  const nav = useNavigate();
++  const [fields, setFields] = useState<Field[]>([]);
++  const [price, setPrice] = useState<number | undefined>(undefined);
++  const [values, setValues] = useState<Record<string, string>>({});
++  const [confirmed, setConfirmed] = useState(false);
++  const [showPin, setShowPin] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const [message, setMessage] = useState('');
++  const [reference, setReference] = useState('');
++  const [history, setHistory] = useState<HistoryEntry[]>([]);
++  const [loadingHistory, setLoadingHistory] = useState(true);
++
++  useEffect(() => {
++    Promise.all([api.get<{ data: Field[] }>('/newspaper-publication/fields'), api.get<{ data: { unit_price: number } }>('/newspaper-publication/price')])
++      .then(([fieldsRes, priceRes]) => {
++        setFields(fieldsRes.data);
++        setPrice(priceRes.data.unit_price);
++      })
++      .catch(() => setMessage('Unable to load this form. Please refresh and try again.'));
++    loadHistory();
++  }, []);
++
++  async function loadHistory() {
++    setLoadingHistory(true);
++    try {
++      const result = await api.get<{ data: HistoryEntry[] }>('/newspaper-publication/history');
++      setHistory(result.data ?? []);
++    } catch {
++      setHistory([]);
++    } finally {
++      setLoadingHistory(false);
++    }
++  }
++
++  function prepare(event: FormEvent) {
++    event.preventDefault();
++    if (!confirmed) {
++      setMessage('Please confirm the details and affidavit are correct before continuing.');
++      return;
++    }
++    setMessage('');
++    setShowPin(true);
++  }
++
++  async function submit(pin: string) {
++    setShowPin(false);
++    setBusy(true);
++    setMessage('');
++    try {
++      const body: Record<string, string> = { ...values, pin };
++      const result = await api.post<{ status: boolean; message: string; data: { reference: string } }>('/newspaper-publication/submit', body);
++      setReference(result.data.reference);
++      setMessage(result.message);
++      setValues({});
++      setConfirmed(false);
++      void loadHistory();
++    } catch (error) {
++      setMessage(error instanceof ApiError ? error.message : 'Request failed. Please try again.');
++    } finally {
++      setBusy(false);
++    }
++  }
++
++  const oldFields = fields.filter((f) => f.key.startsWith('old_'));
++  const newFields = fields.filter((f) => f.key.startsWith('new_'));
++
++  return (
++    <AppShell>
++      <div className="mx-auto max-w-4xl">
++        <button onClick={() => nav('/dashboard')} className="font-body text-sm font-semibold text-[#0b2f73]">
++          ← Dashboard
++        </button>
++
++        <PageHeader title="Newspaper Publication" subtitle="Submit newspaper name change requests and download completed publication files." />
++
++        <section className={FORM_SECTION_CLASSES}>
++          <div className="flex flex-wrap items-center justify-between gap-3">
++            <h2 className="font-display text-lg font-bold text-[#0b2f73]">Name only or Name &amp; DoB Publication</h2>
++            <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">Service cost: {money(price)}</span>
++          </div>
++          <p className={`mt-1 ${FORM_HELP_CLASSES}`}>BluePrint or DailyTrust only. Submit before 5:30pm Monday to Friday only. Duration is 20hrs.</p>
++
++          {!reference ? (
++            <form onSubmit={prepare} className="mt-5 space-y-6">
++              <div>
++                <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wide text-[#0b2f73]/70">Old Details</h3>
++                <div className="grid gap-4 sm:grid-cols-2">
++                  {oldFields.map((field) => (
++                    <label key={field.key} className={FORM_LABEL_CLASSES}>
++                      {field.label}
++                      {!field.required && <span className="ml-1 text-xs font-normal text-[#0b2f73]/40">(optional)</span>}
++                      <input
++                        required={field.required}
++                        className={`mt-1 ${FORM_INPUT_CLASSES}`}
++                        value={values[field.key] ?? ''}
++                        onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
++                      />
++                    </label>
++                  ))}
++                </div>
++              </div>
++
++              <div>
++                <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wide text-[#0b2f73]/70">New Details</h3>
++                <div className="grid gap-4 sm:grid-cols-2">
++                  {newFields.map((field) => (
++                    <label key={field.key} className={FORM_LABEL_CLASSES}>
++                      {field.label}
++                      {!field.required && <span className="ml-1 text-xs font-normal text-[#0b2f73]/40">(optional)</span>}
++                      <input
++                        required={field.required}
++                        className={`mt-1 ${FORM_INPUT_CLASSES}`}
++                        value={values[field.key] ?? ''}
++                        onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
++                      />
++                    </label>
++                  ))}
++                </div>
++              </div>
++
++              <label className="flex items-start gap-2 font-body text-sm text-[#0b2f73]">
++                <input type="checkbox" className="mt-0.5" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
++                I confirm that the newspaper publication details and affidavit are correct.
++              </label>
++
++              <div>
++                <button
++                  disabled={busy}
++                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b2f73] py-3 font-display font-semibold text-white disabled:opacity-60"
++                >
++                  {busy ? <Loader2 size={16} className="animate-spin" /> : 'Submit'}
++                </button>
++                {message && <p className="mt-3 rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>}
++              </div>
++            </form>
++          ) : (
++            <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-center">
++              <p className="font-body text-sm font-semibold text-emerald-800">{message}</p>
++              <p className="mt-1 font-body text-xs text-emerald-700">Reference: {reference}</p>
++              <button onClick={() => setReference('')} className="mt-4 rounded-xl bg-[#0b2f73] px-5 py-2.5 font-display text-sm font-semibold text-white">
++                Submit another request
++              </button>
++            </div>
++          )}
++
++          <div className="mt-8">
++            <h3 className={FORM_LABEL_CLASSES}>Recent requests</h3>
++            {loadingHistory ? (
++              <p className={`mt-2 ${FORM_HELP_CLASSES}`}>Loading…</p>
++            ) : history.length === 0 ? (
++              <p className={`mt-2 ${FORM_HELP_CLASSES}`}>No requests yet.</p>
++            ) : (
++              <ul className="mt-2 space-y-2">
++                {history.map((entry) => (
++                  <li key={entry.reference} className="flex items-center justify-between rounded-xl border border-blue-100 bg-blue-50 p-3 font-body text-xs text-[#0b2f73]">
++                    <span>
++                      {entry.reference} · {new Date(entry.created_at).toLocaleString()} ·{' '}
++                      <span
++                        className={
++                          entry.status === 'success' ? 'font-semibold text-emerald-700' : entry.status === 'failed' ? 'font-semibold text-rose-600' : 'font-semibold text-amber-600'
++                        }
++                      >
++                        {entry.status === 'pending' ? 'Under review' : entry.status}
++                      </span>
++                    </span>
++                    {entry.pdf_base64 && (
++                      <a href={`data:application/pdf;base64,${entry.pdf_base64}`} download={`${entry.reference}.pdf`} className="flex items-center gap-1 font-semibold text-[#0b2f73]">
++                        <Download size={12} /> PDF
++                      </a>
++                    )}
++                  </li>
++                ))}
++              </ul>
++            )}
++          </div>
++        </section>
++      </div>
++
++      <PinConfirmDialog open={showPin} onClose={() => setShowPin(false)} onVerified={submit} />
++    </AppShell>
++  );
++}
+-- 
+2.43.0
+

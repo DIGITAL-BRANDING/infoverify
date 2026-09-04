@@ -77,6 +77,17 @@ enum TransactionType {
   /// hand wherever BVN modifications are actually filed, then marks it
   /// complete. See bvn-modification.service.ts.
   BVN_MODIFICATION
+  /// A submitted Birth Attestation request (NPC Birth Attestation & Instant
+  /// approval). No provider API - same manual pattern as the other
+  /// identity-service requests above: debit now, admin processes it by hand
+  /// with NPC and marks it complete, or reverses it to refund. See
+  /// birth-attestation.service.ts.
+  BIRTH_ATTESTATION
+  /// A submitted Newspaper Publication (name change) request. No provider
+  /// API - same manual pattern: debit now, admin places the actual
+  /// newspaper publication and affidavit by hand, then marks it complete or
+  /// reverses it. See newspaper-publication.service.ts.
+  NEWSPAPER_PUBLICATION
   /// The credit-back entry refundWallet() creates - distinct from the
   /// original debit's own type (e.g. a reversed DATA_PURCHASE gets a REFUND
   /// entry, not a second DATA_PURCHASE). See relatedTransactionId above.

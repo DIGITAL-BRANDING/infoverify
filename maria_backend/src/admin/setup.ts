@@ -14,6 +14,8 @@ import { registerUserWalletRoutes } from './user-wallet.js';
 import { registerCustomerActivityRoutes } from './customer-activity.js';
 import { registerNinModificationRoutes } from './nin-modification.js';
 import { registerBvnModificationRoutes } from './bvn-modification.js';
+import { registerBirthAttestationRoutes } from './birth-attestation.js';
+import { registerNewspaperPublicationRoutes } from './newspaper-publication.js';
 import { registerBvnLicenseRoutes } from './bvn-license-onboarding.js';
 import { registerCacRoutes } from './cac.js';
 import { componentLoader, Components } from './component-loader.js';
@@ -187,6 +189,8 @@ export async function buildAdminRouter() {
   registerCustomerActivityRoutes(router);
   registerNinModificationRoutes(router);
   registerBvnModificationRoutes(router);
+  registerBirthAttestationRoutes(router);
+  registerNewspaperPublicationRoutes(router);
   registerBvnLicenseRoutes(router);
   registerCacRoutes(router);
   registerUserDeliveryRoutes(router);
