@@ -9,10 +9,17 @@ import { PageHeader, FORM_SECTION_CLASSES, FORM_INPUT_CLASSES, FORM_LABEL_CLASSE
 type Field = { key: string; label: string; required: boolean };
 type HistoryEntry = { reference: string; status: string; created_at: string; pdf_base64: string | null };
 
+// Only one real service exists today ("Name only or Name & DoB Publication"),
+// but the reference design still gates the form behind a native <select>
+// "Choose Service" dropdown rather than showing the fields immediately -
+// this mirrors that exact UX (see the reference screenshots).
+const SERVICE_OPTION_VALUE = 'name_or_name_dob';
+
 export default function NewspaperPublicationPage() {
   const nav = useNavigate();
   const [fields, setFields] = useState<Field[]>([]);
   const [price, setPrice] = useState<number | undefined>(undefined);
+  const [selectedService, setSelectedService] = useState('');
   const [values, setValues] = useState<Record<string, string>>({});
   const [confirmed, setConfirmed] = useState(false);
   const [showPin, setShowPin] = useState(false);
@@ -93,58 +100,76 @@ export default function NewspaperPublicationPage() {
           <p className={`mt-1 ${FORM_HELP_CLASSES}`}>BluePrint or DailyTrust only. Submit before 5:30pm Monday to Friday only. Duration is 20hrs.</p>
 
           {!reference ? (
-            <form onSubmit={prepare} className="mt-5 space-y-6">
-              <div>
-                <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wide text-[#0b2f73]/70">Old Details</h3>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {oldFields.map((field) => (
-                    <label key={field.key} className={FORM_LABEL_CLASSES}>
-                      {field.label}
-                      {!field.required && <span className="ml-1 text-xs font-normal text-[#0b2f73]/40">(optional)</span>}
-                      <input
-                        required={field.required}
-                        className={`mt-1 ${FORM_INPUT_CLASSES}`}
-                        value={values[field.key] ?? ''}
-                        onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
-                      />
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wide text-[#0b2f73]/70">New Details</h3>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {newFields.map((field) => (
-                    <label key={field.key} className={FORM_LABEL_CLASSES}>
-                      {field.label}
-                      {!field.required && <span className="ml-1 text-xs font-normal text-[#0b2f73]/40">(optional)</span>}
-                      <input
-                        required={field.required}
-                        className={`mt-1 ${FORM_INPUT_CLASSES}`}
-                        value={values[field.key] ?? ''}
-                        onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
-                      />
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <label className="flex items-start gap-2 font-body text-sm text-[#0b2f73]">
-                <input type="checkbox" className="mt-0.5" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
-                I confirm that the newspaper publication details and affidavit are correct.
+            <div className="mt-5">
+              <label className={FORM_LABEL_CLASSES}>
+                Choose Service:
+                <select
+                  className={`mt-1 ${FORM_INPUT_CLASSES}`}
+                  value={selectedService}
+                  onChange={(e) => setSelectedService(e.target.value)}
+                >
+                  <option value="">-- Select Service --</option>
+                  <option value={SERVICE_OPTION_VALUE}>
+                    Name only or Name &amp; DoB Publication (BluePrint or DailyTrust only) Submit bfre 5:30pm Monday to Fri. only. Duration is 20hrs ({money(price)})
+                  </option>
+                </select>
               </label>
 
-              <div>
-                <button
-                  disabled={busy}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b2f73] py-3 font-display font-semibold text-white disabled:opacity-60"
-                >
-                  {busy ? <Loader2 size={16} className="animate-spin" /> : 'Submit'}
-                </button>
-                {message && <p className="mt-3 rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>}
-              </div>
-            </form>
+              {selectedService === SERVICE_OPTION_VALUE && (
+                <form onSubmit={prepare} className="mt-6 space-y-6">
+                  <div>
+                    <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wide text-[#0b2f73]/70">Old Details</h3>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {oldFields.map((field) => (
+                        <label key={field.key} className={FORM_LABEL_CLASSES}>
+                          {field.label}
+                          {!field.required && <span className="ml-1 text-xs font-normal text-[#0b2f73]/40">(optional)</span>}
+                          <input
+                            required={field.required}
+                            className={`mt-1 ${FORM_INPUT_CLASSES}`}
+                            value={values[field.key] ?? ''}
+                            onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wide text-[#0b2f73]/70">New Details</h3>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {newFields.map((field) => (
+                        <label key={field.key} className={FORM_LABEL_CLASSES}>
+                          {field.label}
+                          {!field.required && <span className="ml-1 text-xs font-normal text-[#0b2f73]/40">(optional)</span>}
+                          <input
+                            required={field.required}
+                            className={`mt-1 ${FORM_INPUT_CLASSES}`}
+                            value={values[field.key] ?? ''}
+                            onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <label className="flex items-start gap-2 font-body text-sm text-[#0b2f73]">
+                    <input type="checkbox" className="mt-0.5" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
+                    I confirm that the newspaper publication details and affidavit are correct.
+                  </label>
+
+                  <div>
+                    <button
+                      disabled={busy}
+                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b2f73] py-3 font-display font-semibold text-white disabled:opacity-60"
+                    >
+                      {busy ? <Loader2 size={16} className="animate-spin" /> : 'Submit'}
+                    </button>
+                    {message && <p className="mt-3 rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>}
+                  </div>
+                </form>
+              )}
+            </div>
           ) : (
             <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-center">
               <p className="font-body text-sm font-semibold text-emerald-800">{message}</p>

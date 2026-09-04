@@ -37,6 +37,7 @@ import { ninModificationRoutes } from './routes/nin-modification.routes.js';
 import { bvnModificationRoutes } from './routes/bvn-modification.routes.js';
 import { birthAttestationRoutes } from './routes/birth-attestation.routes.js';
 import { newspaperPublicationRoutes } from './routes/newspaper-publication.routes.js';
+import { bvnCrmRoutes } from './routes/bvn-crm.routes.js';
 import { vtuRoutes } from './routes/vtu.routes.js';
 import { cableRoutes } from './routes/cable.routes.js';
 import { electricityRoutes } from './routes/electricity.routes.js';
@@ -209,6 +210,7 @@ export function createApp() {
   app.use('/api/bvn-modification', bvnModificationRoutes);
   app.use('/api/birth-attestation', birthAttestationRoutes);
   app.use('/api/newspaper-publication', newspaperPublicationRoutes);
+  app.use('/api/bvn-crm', bvnCrmRoutes);
   app.use('/api', vtuRoutes);
   app.use('/api/cable', cableRoutes);
   app.use('/api/electricity', electricityRoutes);

@@ -6,6 +6,7 @@ import { completeModification } from '../../services/nin-modification.service.js
 import { completeBvnModification } from '../../services/bvn-modification.service.js';
 import { completeBirthAttestation } from '../../services/birth-attestation.service.js';
 import { completeNewspaperPublication } from '../../services/newspaper-publication.service.js';
+import { completeBvnCrm } from '../../services/bvn-crm.service.js';
 import { TransactionStatus } from '@prisma/client';
 import { refundWallet } from '../../services/wallet.service.js';
 import { logAdminAction } from '../audit.js';
@@ -69,7 +70,7 @@ export const transactionResource: ResourceWithOptions = {
           // other transaction type, where PENDING means "still in flight,
           // don't touch it", so this is the one type reverse() also allows
           // from PENDING.
-          if (status === 'PENDING') return ['NIN_MODIFICATION', 'BVN_LICENSE_ONBOARDING', 'CAC_SERVICE_REQUEST', 'BVN_MODIFICATION', 'BIRTH_ATTESTATION', 'NEWSPAPER_PUBLICATION'].includes(record?.params?.type as string);
+          if (status === 'PENDING') return ['NIN_MODIFICATION', 'BVN_LICENSE_ONBOARDING', 'CAC_SERVICE_REQUEST', 'BVN_MODIFICATION', 'BIRTH_ATTESTATION', 'NEWSPAPER_PUBLICATION', 'BVN_CRM'].includes(record?.params?.type as string);
           return status === 'SUCCESS' || status === 'FAILED';
         },
         handler: async (request, response, context) => {
@@ -403,6 +404,65 @@ export const transactionResource: ResourceWithOptions = {
         isAccessible: ({ currentAdmin, record }) => {
           const admin = currentAdmin as unknown as AdminSessionUser | undefined;
           return admin?.role === 'SUPER_ADMIN' && record?.params?.type === 'NEWSPAPER_PUBLICATION';
+        },
+        handler: async (request, response, context) => {
+          const { record, currentAdmin } = context;
+          if (!record) {
+            throw new Error('Missing record');
+          }
+          return { record: record.toJSON(currentAdmin) };
+        }
+      },
+      // Same pair again, for BVN_CRM rows - see bvn-crm.service.ts.
+      completeBvnCrm: {
+        actionType: 'record',
+        icon: 'CheckCircle',
+        guard: 'Mark this BVN CRM request as completed? Only do this after the ticket has actually been followed up on.',
+        isAccessible: ({ currentAdmin, record }) => {
+          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
+          if (!admin || admin.role === 'SUPPORT') return false;
+          return record?.params?.type === 'BVN_CRM' && record?.params?.status === 'PENDING';
+        },
+        handler: async (request, response, context) => {
+          const { record, currentAdmin } = context;
+          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
+          if (!record || !admin) {
+            throw new Error('Missing record or admin context');
+          }
+
+          try {
+            await completeBvnCrm({ transactionId: record.params.id as string });
+
+            await logAdminAction({
+              adminId: admin.id,
+              action: 'COMPLETE_BVN_CRM',
+              targetType: 'Transaction',
+              targetId: record.params.id as string,
+              metadata: { reference: record.params.reference }
+            });
+
+            return {
+              record: record.toJSON(currentAdmin),
+              notice: { message: 'Marked as completed.', type: 'success' }
+            };
+          } catch (error) {
+            return {
+              record: record.toJSON(currentAdmin),
+              notice: {
+                message: error instanceof Error ? error.message : 'Could not mark this as completed',
+                type: 'error'
+              }
+            };
+          }
+        }
+      },
+      downloadBvnCrmPdf: {
+        actionType: 'record',
+        icon: 'Download',
+        component: Components.RedirectToManage,
+        isAccessible: ({ currentAdmin, record }) => {
+          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
+          return admin?.role === 'SUPER_ADMIN' && record?.params?.type === 'BVN_CRM';
         },
         handler: async (request, response, context) => {
           const { record, currentAdmin } = context;

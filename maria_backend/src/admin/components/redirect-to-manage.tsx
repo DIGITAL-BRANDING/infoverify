@@ -33,7 +33,8 @@ const TARGET_PATH_BY_TYPE: Record<string, (id: string) => string> = {
   BVN_LICENSE_ONBOARDING: (id) => `/admin/bvn-license/${id}/pdf`,
   BVN_MODIFICATION: (id) => `/admin/bvn-modification/${id}/pdf`,
   BIRTH_ATTESTATION: (id) => `/admin/birth-attestation/${id}/pdf`,
-  NEWSPAPER_PUBLICATION: (id) => `/admin/newspaper-publication/${id}/pdf`
+  NEWSPAPER_PUBLICATION: (id) => `/admin/newspaper-publication/${id}/pdf`,
+  BVN_CRM: (id) => `/admin/bvn-crm/${id}/pdf`
 };
 
 const RedirectToManage: React.FC<RedirectToManageProps> = ({ record }) => {

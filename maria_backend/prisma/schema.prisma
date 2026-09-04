@@ -88,6 +88,13 @@ enum TransactionType {
   /// newspaper publication and affidavit by hand, then marks it complete or
   /// reverses it. See newspaper-publication.service.ts.
   NEWSPAPER_PUBLICATION
+  /// A submitted BVN CRM ticket (customer supplies the 8-digit TicketID
+  /// already raised on the bank/NIBSS CRM portal, e.g. 88248XXX). No
+  /// provider API for this either - same manual pattern as the other
+  /// identity-service requests above: debit now, admin follows up on the
+  /// ticket by hand and marks it complete, or reverses it to refund. See
+  /// bvn-crm.service.ts.
+  BVN_CRM
   /// The credit-back entry refundWallet() creates - distinct from the
   /// original debit's own type (e.g. a reversed DATA_PURCHASE gets a REFUND
   /// entry, not a second DATA_PURCHASE). See relatedTransactionId above.

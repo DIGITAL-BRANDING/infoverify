@@ -74,7 +74,7 @@ export const SERVICES: ServiceItem[] = [
   // loop so only the real page's route exists.
   { label: 'BVN License Creation', description: 'Create and onboard a BVN license.', icon: Fingerprint, route: '/bvn-license', tint: 'gold', implemented: true },
   { label: 'BVN Modification', description: 'Request a BVN record modification.', icon: Fingerprint, route: '/bvn-modification', tint: 'bronze', implemented: true },
-  { label: 'BVN CRM', description: 'Manage BVN customer records.', icon: Fingerprint, route: '/bvn-crm', tint: 'gold', implemented: false },
+  { label: 'BVN CRM', description: 'Submit your BVN CRM TicketID for follow-up.', icon: Fingerprint, route: '/bvn-crm', tint: 'gold', implemented: true },
   // Sidebar-only links (components/AppShell.tsx) that had no SERVICES entry
   // and therefore no route at all anywhere - not even a "coming soon"
   // fallback, since that's generated from this array. Clicking either one

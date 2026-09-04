@@ -30,6 +30,7 @@ import NinModificationPage from './pages/NinModificationPage';
 import BvnModificationPage from './pages/BvnModificationPage';
 import BirthAttestationPage from './pages/BirthAttestationPage';
 import NewspaperPublicationPage from './pages/NewspaperPublicationPage';
+import BvnCrmPage from './pages/BvnCrmPage';
 import FundWalletPage from './pages/FundWalletPage';
 import PaymentCallbackPage from './pages/PaymentCallbackPage';
 import DeliveriesPage from './pages/DeliveriesPage';
@@ -95,6 +96,7 @@ export default function App() {
           <Route path="/bvn-modification" element={<ProtectedRoute><BvnModificationPage /></ProtectedRoute>} />
           <Route path="/attestation" element={<ProtectedRoute><BirthAttestationPage /></ProtectedRoute>} />
           <Route path="/newspaper" element={<ProtectedRoute><NewspaperPublicationPage /></ProtectedRoute>} />
+          <Route path="/bvn-crm" element={<ProtectedRoute><BvnCrmPage /></ProtectedRoute>} />
           <Route path="/modification" element={<ProtectedRoute><NinModificationPage /></ProtectedRoute>} />
           <Route path="/tracking" element={<ProtectedRoute><PersonalizationPage /></ProtectedRoute>} />
           <Route path="/delink" element={<ProtectedRoute><DelinkPage /></ProtectedRoute>} />

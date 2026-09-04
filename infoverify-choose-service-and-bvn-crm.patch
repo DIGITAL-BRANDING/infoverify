@@ -1,0 +1,1179 @@
+From aca6d96353419f796682da412d659a86e4d9055b Mon Sep 17 00:00:00 2001
+From: Claude <dev@infoverify.local>
+Date: Fri, 4 Sep 2026 08:32:10 +0000
+Subject: [PATCH] Add Choose Service dropdown gate + red NOTE to
+ Attestation/Newspaper, ship BVN CRM
+
+Newspaper Publication and Birth Attestation now match the reference
+design's own UX: a native <select> "Choose Service" dropdown gates the
+form - fields don't render until the (single) option is picked. Birth
+Attestation also gained the red NOTE banner from the reference
+screenshot ("Dear customers, please be informed that only modifications
+between 1 day and 5 years are allowed."), shown once that option is
+selected.
+
+BVN CRM (new): same manual-review pattern as BVN/NIN Modification
+throughout - no provider API, so the customer's 8-digit TicketID
+(88248XXX-shaped) is debited from the wallet, rendered to a submission
+PDF, and left PENDING for an admin to follow up on by hand in the
+background and mark complete via the Transaction resource (or reverse
+to refund) - never manual outside the admin panel.
+
+- New TransactionType value BVN_CRM (+ migration, ADD VALUE IF NOT
+  EXISTS matching the existing attestation/newspaper migration's shape).
+- bvn-crm.service.ts/.routes.ts: single fixed field (ticket_id, 8
+  digits), price defaults to N2,000 via ServicePricing - same
+  admin-editable-without-a-deploy row every other manual service uses
+  (sellingPriceKobo overrides providerCostKobo, isActive can pull it).
+- Admin wiring mirrors completeBirthAttestation/downloadBirthAttestationPdf
+  exactly: completeBvnCrm/downloadBvnCrmPdf action pair on the
+  Transaction resource, PENDING-reversal allowlist extended,
+  TARGET_PATH_BY_TYPE in redirect-to-manage.tsx extended, SUPER_ADMIN-only
+  audited PDF route registered in admin/setup.ts.
+- Frontend: BvnCrmPage.tsx (/bvn-crm, services.ts flipped to
+  implemented: true) - "Submit your 8 DIGITS TicketID looks like:
+  88248XXX" field, "processed within 24 - 48hrs" copy, PIN-confirm +
+  history/PDF-download shape matching every other manual-review page.
+
+Verified: all 173 existing backend tests still pass unchanged. Frontend
+tsc + vite build both clean. Backend tsc shows the same class of stale-
+Prisma-client errors already present on birth-attestation.service.ts/
+newspaper-publication.service.ts (this sandbox can't reach
+binaries.prisma.sh to run prisma generate) - bvn-crm.service.ts has the
+identical error shape/count, nothing new introduced. Running prisma
+generate locally clears these the same way it always has.
+---
+ .../20260904120000_add_bvn_crm/migration.sql  |   2 +
+ maria_backend/prisma/schema.prisma            |   7 +
+ maria_backend/src/admin/bvn-crm.ts            |  52 ++++
+ .../admin/components/redirect-to-manage.tsx   |   3 +-
+ .../admin/resources/transaction.resource.ts   |  62 ++++-
+ maria_backend/src/admin/setup.ts              |   2 +
+ maria_backend/src/app.ts                      |   2 +
+ maria_backend/src/routes/bvn-crm.routes.ts    |  55 +++++
+ maria_backend/src/services/bvn-crm.service.ts | 200 +++++++++++++++
+ web/src/App.tsx                               |   2 +
+ web/src/lib/services.ts                       |   2 +-
+ web/src/pages/BirthAttestationPage.tsx        | 229 +++++++++++-------
+ web/src/pages/BvnCrmPage.tsx                  | 160 ++++++++++++
+ web/src/pages/NewspaperPublicationPage.tsx    | 125 ++++++----
+ 14 files changed, 756 insertions(+), 147 deletions(-)
+ create mode 100644 maria_backend/prisma/migrations/20260904120000_add_bvn_crm/migration.sql
+ create mode 100644 maria_backend/src/admin/bvn-crm.ts
+ create mode 100644 maria_backend/src/routes/bvn-crm.routes.ts
+ create mode 100644 maria_backend/src/services/bvn-crm.service.ts
+ create mode 100644 web/src/pages/BvnCrmPage.tsx
+
+diff --git a/maria_backend/prisma/migrations/20260904120000_add_bvn_crm/migration.sql b/maria_backend/prisma/migrations/20260904120000_add_bvn_crm/migration.sql
+new file mode 100644
+index 0000000..b40b1a3
+--- /dev/null
++++ b/maria_backend/prisma/migrations/20260904120000_add_bvn_crm/migration.sql
+@@ -0,0 +1,2 @@
++-- AlterEnum
++ALTER TYPE "TransactionType" ADD VALUE IF NOT EXISTS 'BVN_CRM';
+diff --git a/maria_backend/prisma/schema.prisma b/maria_backend/prisma/schema.prisma
+index 964907a..ec8a8df 100644
+--- a/maria_backend/prisma/schema.prisma
++++ b/maria_backend/prisma/schema.prisma
+@@ -88,6 +88,13 @@ enum TransactionType {
+   /// newspaper publication and affidavit by hand, then marks it complete or
+   /// reverses it. See newspaper-publication.service.ts.
+   NEWSPAPER_PUBLICATION
++  /// A submitted BVN CRM ticket (customer supplies the 8-digit TicketID
++  /// already raised on the bank/NIBSS CRM portal, e.g. 88248XXX). No
++  /// provider API for this either - same manual pattern as the other
++  /// identity-service requests above: debit now, admin follows up on the
++  /// ticket by hand and marks it complete, or reverses it to refund. See
++  /// bvn-crm.service.ts.
++  BVN_CRM
+   /// The credit-back entry refundWallet() creates - distinct from the
+   /// original debit's own type (e.g. a reversed DATA_PURCHASE gets a REFUND
+   /// entry, not a second DATA_PURCHASE). See relatedTransactionId above.
+diff --git a/maria_backend/src/admin/bvn-crm.ts b/maria_backend/src/admin/bvn-crm.ts
+new file mode 100644
+index 0000000..4928cef
+--- /dev/null
++++ b/maria_backend/src/admin/bvn-crm.ts
+@@ -0,0 +1,52 @@
++import type { Request, Router } from 'express';
++import { TransactionType } from '@prisma/client';
++import { prisma } from '../lib/prisma.js';
++import { decryptBvnCrmPII } from '../services/bvn-crm.service.js';
++import { logAdminAction } from './audit.js';
++import type { AdminSessionUser } from './auth.js';
++
++declare module 'express-session' {
++  interface SessionData {
++    adminUser?: AdminSessionUser;
++  }
++}
++
++/**
++ * Same SUPER_ADMIN-only, audit-logged PDF stream as
++ * registerBirthAttestationRoutes()/registerBvnModificationRoutes() - see
++ * those files' comments. Reached via the "Download PDF" admin action's
++ * redirectUrl on the Transaction resource.
++ */
++export function registerBvnCrmRoutes(router: Router) {
++  router.get('/bvn-crm/:transactionId/pdf', async (req: Request, res) => {
++    const admin = req.session?.adminUser;
++    if (!admin) return res.redirect('/admin/login');
++    if (admin.role !== 'SUPER_ADMIN') {
++      return res.status(403).type('html').send('<p>Only a Super Admin can open BVN CRM submission PDFs.</p>');
++    }
++
++    const transactionId = Array.isArray(req.params.transactionId) ? req.params.transactionId[0] : req.params.transactionId;
++    const transaction = await prisma.transaction.findUnique({ where: { id: transactionId } });
++    if (!transaction || transaction.type !== TransactionType.BVN_CRM) {
++      return res.status(404).type('html').send('<p>BVN CRM transaction not found.</p>');
++    }
++
++    const pii = decryptBvnCrmPII(transaction);
++    if (!pii?.pdf_base64 || typeof pii.pdf_base64 !== 'string') {
++      return res.status(404).type('html').send('<p>No PDF was generated for this request.</p>');
++    }
++
++    await logAdminAction({
++      adminId: admin.id,
++      action: 'VIEW_TRANSACTION_PII',
++      targetType: 'Transaction',
++      targetId: transaction.id,
++      metadata: { reference: transaction.reference, via: 'bvn_crm_pdf' }
++    });
++
++    const buffer = Buffer.from(pii.pdf_base64, 'base64');
++    res.setHeader('Content-Type', 'application/pdf');
++    res.setHeader('Content-Disposition', `inline; filename="${transaction.reference}.pdf"`);
++    res.send(buffer);
++  });
++}
+diff --git a/maria_backend/src/admin/components/redirect-to-manage.tsx b/maria_backend/src/admin/components/redirect-to-manage.tsx
+index d3e8e2a..335f4d0 100644
+--- a/maria_backend/src/admin/components/redirect-to-manage.tsx
++++ b/maria_backend/src/admin/components/redirect-to-manage.tsx
+@@ -33,7 +33,8 @@ const TARGET_PATH_BY_TYPE: Record<string, (id: string) => string> = {
+   BVN_LICENSE_ONBOARDING: (id) => `/admin/bvn-license/${id}/pdf`,
+   BVN_MODIFICATION: (id) => `/admin/bvn-modification/${id}/pdf`,
+   BIRTH_ATTESTATION: (id) => `/admin/birth-attestation/${id}/pdf`,
+-  NEWSPAPER_PUBLICATION: (id) => `/admin/newspaper-publication/${id}/pdf`
++  NEWSPAPER_PUBLICATION: (id) => `/admin/newspaper-publication/${id}/pdf`,
++  BVN_CRM: (id) => `/admin/bvn-crm/${id}/pdf`
+ };
+ 
+ const RedirectToManage: React.FC<RedirectToManageProps> = ({ record }) => {
+diff --git a/maria_backend/src/admin/resources/transaction.resource.ts b/maria_backend/src/admin/resources/transaction.resource.ts
+index 4fa999d..c38cb32 100644
+--- a/maria_backend/src/admin/resources/transaction.resource.ts
++++ b/maria_backend/src/admin/resources/transaction.resource.ts
+@@ -6,6 +6,7 @@ import { completeModification } from '../../services/nin-modification.service.js
+ import { completeBvnModification } from '../../services/bvn-modification.service.js';
+ import { completeBirthAttestation } from '../../services/birth-attestation.service.js';
+ import { completeNewspaperPublication } from '../../services/newspaper-publication.service.js';
++import { completeBvnCrm } from '../../services/bvn-crm.service.js';
+ import { TransactionStatus } from '@prisma/client';
+ import { refundWallet } from '../../services/wallet.service.js';
+ import { logAdminAction } from '../audit.js';
+@@ -69,7 +70,7 @@ export const transactionResource: ResourceWithOptions = {
+           // other transaction type, where PENDING means "still in flight,
+           // don't touch it", so this is the one type reverse() also allows
+           // from PENDING.
+-          if (status === 'PENDING') return ['NIN_MODIFICATION', 'BVN_LICENSE_ONBOARDING', 'CAC_SERVICE_REQUEST', 'BVN_MODIFICATION', 'BIRTH_ATTESTATION', 'NEWSPAPER_PUBLICATION'].includes(record?.params?.type as string);
++          if (status === 'PENDING') return ['NIN_MODIFICATION', 'BVN_LICENSE_ONBOARDING', 'CAC_SERVICE_REQUEST', 'BVN_MODIFICATION', 'BIRTH_ATTESTATION', 'NEWSPAPER_PUBLICATION', 'BVN_CRM'].includes(record?.params?.type as string);
+           return status === 'SUCCESS' || status === 'FAILED';
+         },
+         handler: async (request, response, context) => {
+@@ -412,6 +413,65 @@ export const transactionResource: ResourceWithOptions = {
+           return { record: record.toJSON(currentAdmin) };
+         }
+       },
++      // Same pair again, for BVN_CRM rows - see bvn-crm.service.ts.
++      completeBvnCrm: {
++        actionType: 'record',
++        icon: 'CheckCircle',
++        guard: 'Mark this BVN CRM request as completed? Only do this after the ticket has actually been followed up on.',
++        isAccessible: ({ currentAdmin, record }) => {
++          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
++          if (!admin || admin.role === 'SUPPORT') return false;
++          return record?.params?.type === 'BVN_CRM' && record?.params?.status === 'PENDING';
++        },
++        handler: async (request, response, context) => {
++          const { record, currentAdmin } = context;
++          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
++          if (!record || !admin) {
++            throw new Error('Missing record or admin context');
++          }
++
++          try {
++            await completeBvnCrm({ transactionId: record.params.id as string });
++
++            await logAdminAction({
++              adminId: admin.id,
++              action: 'COMPLETE_BVN_CRM',
++              targetType: 'Transaction',
++              targetId: record.params.id as string,
++              metadata: { reference: record.params.reference }
++            });
++
++            return {
++              record: record.toJSON(currentAdmin),
++              notice: { message: 'Marked as completed.', type: 'success' }
++            };
++          } catch (error) {
++            return {
++              record: record.toJSON(currentAdmin),
++              notice: {
++                message: error instanceof Error ? error.message : 'Could not mark this as completed',
++                type: 'error'
++              }
++            };
++          }
++        }
++      },
++      downloadBvnCrmPdf: {
++        actionType: 'record',
++        icon: 'Download',
++        component: Components.RedirectToManage,
++        isAccessible: ({ currentAdmin, record }) => {
++          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
++          return admin?.role === 'SUPER_ADMIN' && record?.params?.type === 'BVN_CRM';
++        },
++        handler: async (request, response, context) => {
++          const { record, currentAdmin } = context;
++          if (!record) {
++            throw new Error('Missing record');
++          }
++          return { record: record.toJSON(currentAdmin) };
++        }
++      },
+       completeBvnLicense: {
+         actionType: 'record', icon: 'CheckCircle',
+         guard: 'Mark this BVN License request as completed?',
+diff --git a/maria_backend/src/admin/setup.ts b/maria_backend/src/admin/setup.ts
+index 9f40a23..f68500b 100644
+--- a/maria_backend/src/admin/setup.ts
++++ b/maria_backend/src/admin/setup.ts
+@@ -16,6 +16,7 @@ import { registerNinModificationRoutes } from './nin-modification.js';
+ import { registerBvnModificationRoutes } from './bvn-modification.js';
+ import { registerBirthAttestationRoutes } from './birth-attestation.js';
+ import { registerNewspaperPublicationRoutes } from './newspaper-publication.js';
++import { registerBvnCrmRoutes } from './bvn-crm.js';
+ import { registerBvnLicenseRoutes } from './bvn-license-onboarding.js';
+ import { registerCacRoutes } from './cac.js';
+ import { componentLoader, Components } from './component-loader.js';
+@@ -191,6 +192,7 @@ export async function buildAdminRouter() {
+   registerBvnModificationRoutes(router);
+   registerBirthAttestationRoutes(router);
+   registerNewspaperPublicationRoutes(router);
++  registerBvnCrmRoutes(router);
+   registerBvnLicenseRoutes(router);
+   registerCacRoutes(router);
+   registerUserDeliveryRoutes(router);
+diff --git a/maria_backend/src/app.ts b/maria_backend/src/app.ts
+index 62fdf22..d369aa3 100644
+--- a/maria_backend/src/app.ts
++++ b/maria_backend/src/app.ts
+@@ -37,6 +37,7 @@ import { ninModificationRoutes } from './routes/nin-modification.routes.js';
+ import { bvnModificationRoutes } from './routes/bvn-modification.routes.js';
+ import { birthAttestationRoutes } from './routes/birth-attestation.routes.js';
+ import { newspaperPublicationRoutes } from './routes/newspaper-publication.routes.js';
++import { bvnCrmRoutes } from './routes/bvn-crm.routes.js';
+ import { vtuRoutes } from './routes/vtu.routes.js';
+ import { cableRoutes } from './routes/cable.routes.js';
+ import { electricityRoutes } from './routes/electricity.routes.js';
+@@ -209,6 +210,7 @@ export function createApp() {
+   app.use('/api/bvn-modification', bvnModificationRoutes);
+   app.use('/api/birth-attestation', birthAttestationRoutes);
+   app.use('/api/newspaper-publication', newspaperPublicationRoutes);
++  app.use('/api/bvn-crm', bvnCrmRoutes);
+   app.use('/api', vtuRoutes);
+   app.use('/api/cable', cableRoutes);
+   app.use('/api/electricity', electricityRoutes);
+diff --git a/maria_backend/src/routes/bvn-crm.routes.ts b/maria_backend/src/routes/bvn-crm.routes.ts
+new file mode 100644
+index 0000000..8fc04d8
+--- /dev/null
++++ b/maria_backend/src/routes/bvn-crm.routes.ts
+@@ -0,0 +1,55 @@
++import { Router } from 'express';
++import { z } from 'zod';
++import { requireAuth } from '../middleware/auth.js';
++import { pinField, requirePinConfirmation } from '../lib/require-pin.js';
++import { BVN_CRM_FIELDS, getBvnCrmPrice, listBvnCrmHistory, submitBvnCrmRequest } from '../services/bvn-crm.service.js';
++
++export const bvnCrmRoutes = Router();
++
++bvnCrmRoutes.use(requireAuth);
++
++function idempotencyKeyFrom(req: { header: (name: string) => string | undefined }) {
++  const header = req.header('Idempotency-Key');
++  return header && header.trim().length > 0 ? header.trim() : undefined;
++}
++
++const submitSchema = z.object({
++  ticket_id: z
++    .string()
++    .trim()
++    .length(8, 'Must be exactly 8 digits')
++    .regex(/^\d{8}$/, 'Must be 8 digits'),
++  ...pinField
++});
++
++bvnCrmRoutes.get('/fields', (_req, res) => {
++  res.json({ status: true, data: BVN_CRM_FIELDS });
++});
++
++bvnCrmRoutes.get('/price', async (_req, res) => {
++  const price = await getBvnCrmPrice();
++  res.json({ status: true, data: { unit_price: price.unitPrice } });
++});
++
++bvnCrmRoutes.get('/history', async (req, res) => {
++  const data = await listBvnCrmHistory({ userId: req.user!.id });
++  res.set('Cache-Control', 'no-store');
++  res.json({ status: true, data });
++});
++
++bvnCrmRoutes.post('/submit', async (req, res) => {
++  const body = submitSchema.parse(req.body);
++  await requirePinConfirmation(req.user!.id, body.pin);
++  const { pin, ...values } = body;
++  void pin;
++  const result = await submitBvnCrmRequest({
++    userId: req.user!.id,
++    values,
++    idempotencyKey: idempotencyKeyFrom(req)
++  });
++  res.json({
++    status: true,
++    message: 'Your BVN CRM request has been submitted. It will be processed within 24 - 48hrs.',
++    data: { reference: result.reference, balance_after: result.balanceAfter }
++  });
++});
+diff --git a/maria_backend/src/services/bvn-crm.service.ts b/maria_backend/src/services/bvn-crm.service.ts
+new file mode 100644
+index 0000000..52c3fe8
+--- /dev/null
++++ b/maria_backend/src/services/bvn-crm.service.ts
+@@ -0,0 +1,200 @@
++import PDFDocument from 'pdfkit';
++import { Prisma, TransactionStatus, TransactionType } from '@prisma/client';
++import { koboToNaira } from '../lib/money.js';
++import { sealPII, openPII } from '../lib/pii.js';
++import { prisma } from '../lib/prisma.js';
++import { ApiError } from '../middleware/error.js';
++import { debitWallet } from './wallet.service.js';
++
++/**
++ * BVN CRM — same manual-review pattern as Birth Attestation/Newspaper
++ * Publication/NIN/BVN Modification: no provider API for this (the customer
++ * has already raised a ticket on the bank/NIBSS BVN CRM portal themselves
++ * and just needs an admin to follow up on it), so submitBvnCrmRequest()
++ * debits the wallet, generates a submission PDF, and leaves the
++ * transaction PENDING for an admin to work the ticket by hand and, from
++ * the Transaction admin page, either mark it complete
++ * (completeBvnCrm()) or reject it (the existing generic "reverse" action,
++ * which refunds).
++ *
++ * Only one field: the 8-digit TicketID the customer already has from the
++ * CRM portal (looks like 88248XXX).
++ */
++const SERVICE_KEY = 'BVN_CRM';
++const DEFAULT_PRICE = 2000;
++
++export type BvnCrmField = { key: string; label: string; required: boolean; placeholder?: string };
++
++export const BVN_CRM_FIELDS: BvnCrmField[] = [
++  { key: 'ticket_id', label: '8 DIGITS TicketID', required: true, placeholder: 'e.g. 88248XXX' }
++];
++
++function priceToKobo(amount: number) {
++  return BigInt(Math.round(amount * 100));
++}
++
++/** Same plain-findUnique-then-conditional-create shape used throughout -
++ *  never resets an admin's already-configured price back to the default. */
++async function getOrCreatePricingRow() {
++  const existing = await prisma.servicePricing.findUnique({ where: { service: SERVICE_KEY } });
++  if (existing) return existing;
++
++  try {
++    return await prisma.servicePricing.create({
++      data: {
++        service: SERVICE_KEY,
++        provider: 'manual',
++        label: 'BVN CRM \u2014 Ticket follow-up',
++        providerCostKobo: priceToKobo(DEFAULT_PRICE)
++      }
++    });
++  } catch (error) {
++    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
++      return prisma.servicePricing.findUniqueOrThrow({ where: { service: SERVICE_KEY } });
++    }
++    throw error;
++  }
++}
++
++export async function getBvnCrmPrice() {
++  const row = await getOrCreatePricingRow();
++  if (!row.isActive) {
++    throw new ApiError(422, `${row.label} is currently unavailable`, 'SERVICE_INACTIVE');
++  }
++  const unitKobo = row.sellingPriceKobo ?? row.providerCostKobo;
++  return { unitPrice: koboToNaira(unitKobo), providerCostKobo: row.providerCostKobo };
++}
++
++function renderBvnCrmPdf(params: { reference: string; values: Record<string, unknown>; submittedAt: Date }): Promise<string> {
++  return new Promise((resolve, reject) => {
++    const doc = new PDFDocument({ size: 'A4', margin: 50 });
++    const chunks: Buffer[] = [];
++    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
++    doc.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
++    doc.on('error', reject);
++
++    doc.fontSize(16).font('Helvetica-Bold').text('MARIA Digital Solutions \u2014 BVN CRM Request', { align: 'center' });
++    doc.moveDown(0.3);
++    doc.fontSize(10).font('Helvetica').fillColor('#555').text('Ticket follow-up', { align: 'center' });
++    doc.moveDown(1);
++    doc.fillColor('#000');
++
++    doc.fontSize(10).font('Helvetica-Bold').text('Reference: ', { continued: true }).font('Helvetica').text(params.reference);
++    doc.font('Helvetica-Bold').text('Submitted: ', { continued: true }).font('Helvetica').text(params.submittedAt.toISOString());
++    doc.moveDown(1);
++    doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#ccc').stroke();
++    doc.moveDown(1);
++
++    for (const field of BVN_CRM_FIELDS) {
++      const raw = params.values[field.key];
++      const value = raw === undefined || raw === null || raw === '' ? '\u2014' : String(raw);
++      doc.font('Helvetica-Bold').fontSize(10).text(`${field.label}: `, { continued: true });
++      doc.font('Helvetica').text(value);
++    }
++
++    doc.moveDown(1.5);
++    doc
++      .fontSize(8)
++      .fillColor('#888')
++      .text('This is a submission record only. Processed manually by an admin.', { align: 'left' });
++
++    doc.end();
++  });
++}
++
++export type SubmitBvnCrmResult = { reference: string; balanceAfter: number };
++
++export async function submitBvnCrmRequest(params: {
++  userId: string;
++  values: Record<string, unknown>;
++  idempotencyKey?: string;
++}): Promise<SubmitBvnCrmResult> {
++  const price = await getBvnCrmPrice();
++
++  const debit = await debitWallet({
++    userId: params.userId,
++    amount: price.unitPrice,
++    type: TransactionType.BVN_CRM,
++    description: 'BVN CRM \u2014 Ticket follow-up',
++    metadata: {
++      service: SERVICE_KEY,
++      unit_price: price.unitPrice,
++      pii: sealPII(params.values)
++    } as Prisma.InputJsonValue,
++    idempotencyKey: params.idempotencyKey,
++    // No provider was actually paid yet - an admin follows up on the ticket by hand.
++    costKobo: price.providerCostKobo
++  });
++
++  if (debit.reused) {
++    return { reference: debit.reference, balanceAfter: debit.balanceAfter };
++  }
++
++  const pdfBase64 = await renderBvnCrmPdf({
++    reference: debit.reference,
++    values: params.values,
++    submittedAt: debit.transaction.createdAt
++  });
++
++  await prisma.transaction.update({
++    where: { id: debit.transaction.id },
++    data: {
++      metadata: {
++        service: SERVICE_KEY,
++        unit_price: price.unitPrice,
++        pii: sealPII({ ...params.values, pdf_base64: pdfBase64 })
++      } as Prisma.InputJsonValue
++    }
++  });
++
++  return { reference: debit.reference, balanceAfter: debit.balanceAfter };
++}
++
++export type BvnCrmHistoryEntry = { reference: string; status: string; created_at: string; pdf_base64: string | null };
++
++export async function listBvnCrmHistory(params: { userId: string }) {
++  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
++  const transactions = await prisma.transaction.findMany({
++    where: {
++      userId: params.userId,
++      type: TransactionType.BVN_CRM,
++      status: TransactionStatus.SUCCESS,
++      updatedAt: { gte: since }
++    },
++    orderBy: { updatedAt: 'desc' },
++    take: 20
++  });
++
++  return transactions.map((transaction): BvnCrmHistoryEntry => {
++    const metadata = transaction.metadata as Record<string, unknown> | null;
++    const pii = openPII<{ pdf_base64?: string }>(metadata?.pii);
++    return {
++      reference: transaction.reference,
++      status: transaction.status.toLowerCase(),
++      created_at: transaction.updatedAt.toISOString(),
++      pdf_base64: typeof pii?.pdf_base64 === 'string' ? pii.pdf_base64 : null
++    };
++  });
++}
++
++/** Called from the "Complete BVN CRM" admin action once the ticket has
++ *  actually been followed up on. No wallet movement - the customer was
++ *  already charged at submit time. Rejection uses the existing generic
++ *  refundWallet()/"reverse" admin action. */
++export async function completeBvnCrm(params: { transactionId: string }) {
++  const transaction = await prisma.transaction.findUnique({ where: { id: params.transactionId } });
++  if (!transaction || transaction.type !== TransactionType.BVN_CRM) {
++    throw new ApiError(404, 'BVN CRM transaction not found', 'TRANSACTION_NOT_FOUND');
++  }
++  if (transaction.status !== TransactionStatus.PENDING) {
++    throw new ApiError(422, 'Only a pending request can be marked complete', 'INVALID_STATUS');
++  }
++  return prisma.transaction.update({ where: { id: transaction.id }, data: { status: TransactionStatus.SUCCESS } });
++}
++
++/** Decrypts the sealed PII (including the generated PDF) for the admin's
++ *  PDF-download route. Never call this from a user-facing endpoint. */
++export function decryptBvnCrmPII(transaction: { metadata: unknown }) {
++  const metadata = transaction.metadata as Record<string, unknown> | null;
++  return openPII<Record<string, unknown> & { pdf_base64?: string }>(metadata?.pii);
++}
+diff --git a/web/src/App.tsx b/web/src/App.tsx
+index 9121efa..0a4af97 100644
+--- a/web/src/App.tsx
++++ b/web/src/App.tsx
+@@ -30,6 +30,7 @@ import NinModificationPage from './pages/NinModificationPage';
+ import BvnModificationPage from './pages/BvnModificationPage';
+ import BirthAttestationPage from './pages/BirthAttestationPage';
+ import NewspaperPublicationPage from './pages/NewspaperPublicationPage';
++import BvnCrmPage from './pages/BvnCrmPage';
+ import FundWalletPage from './pages/FundWalletPage';
+ import PaymentCallbackPage from './pages/PaymentCallbackPage';
+ import DeliveriesPage from './pages/DeliveriesPage';
+@@ -95,6 +96,7 @@ export default function App() {
+           <Route path="/bvn-modification" element={<ProtectedRoute><BvnModificationPage /></ProtectedRoute>} />
+           <Route path="/attestation" element={<ProtectedRoute><BirthAttestationPage /></ProtectedRoute>} />
+           <Route path="/newspaper" element={<ProtectedRoute><NewspaperPublicationPage /></ProtectedRoute>} />
++          <Route path="/bvn-crm" element={<ProtectedRoute><BvnCrmPage /></ProtectedRoute>} />
+           <Route path="/modification" element={<ProtectedRoute><NinModificationPage /></ProtectedRoute>} />
+           <Route path="/tracking" element={<ProtectedRoute><PersonalizationPage /></ProtectedRoute>} />
+           <Route path="/delink" element={<ProtectedRoute><DelinkPage /></ProtectedRoute>} />
+diff --git a/web/src/lib/services.ts b/web/src/lib/services.ts
+index 53e7baf..7cdd86a 100644
+--- a/web/src/lib/services.ts
++++ b/web/src/lib/services.ts
+@@ -74,7 +74,7 @@ export const SERVICES: ServiceItem[] = [
+   // loop so only the real page's route exists.
+   { label: 'BVN License Creation', description: 'Create and onboard a BVN license.', icon: Fingerprint, route: '/bvn-license', tint: 'gold', implemented: true },
+   { label: 'BVN Modification', description: 'Request a BVN record modification.', icon: Fingerprint, route: '/bvn-modification', tint: 'bronze', implemented: true },
+-  { label: 'BVN CRM', description: 'Manage BVN customer records.', icon: Fingerprint, route: '/bvn-crm', tint: 'gold', implemented: false },
++  { label: 'BVN CRM', description: 'Submit your BVN CRM TicketID for follow-up.', icon: Fingerprint, route: '/bvn-crm', tint: 'gold', implemented: true },
+   // Sidebar-only links (components/AppShell.tsx) that had no SERVICES entry
+   // and therefore no route at all anywhere - not even a "coming soon"
+   // fallback, since that's generated from this array. Clicking either one
+diff --git a/web/src/pages/BirthAttestationPage.tsx b/web/src/pages/BirthAttestationPage.tsx
+index 9afc0b0..9930b9c 100644
+--- a/web/src/pages/BirthAttestationPage.tsx
++++ b/web/src/pages/BirthAttestationPage.tsx
+@@ -1,6 +1,6 @@
+ import { useEffect, useMemo, useState, type FormEvent } from 'react';
+ import { useNavigate } from 'react-router-dom';
+-import { Download, Loader2 } from 'lucide-react';
++import { AlertTriangle, Download, Loader2 } from 'lucide-react';
+ import AppShell from '../components/AppShell';
+ import { api, ApiError } from '../lib/api';
+ import { PinConfirmDialog } from '../components/PinConfirmDialog';
+@@ -12,6 +12,13 @@ type HistoryEntry = { reference: string; status: string; created_at: string; pdf
+ 
+ const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4MB raw file - keeps the base64'd body comfortably under the backend's 8mb JSON limit
+ 
++// Only one real service exists today ("NPC Birth Attestation & Instant
++// approval"), but the reference design still gates the form behind a
++// native <select> "Choose Service" dropdown, and shows a red NOTE banner
++// once that one option is picked - this mirrors that exact UX (see the
++// reference screenshots).
++const SERVICE_OPTION_VALUE = 'npc_birth_attestation';
++
+ function readImageAsDataUrl(file: File): Promise<string> {
+   return new Promise((resolve, reject) => {
+     const reader = new FileReader();
+@@ -25,6 +32,7 @@ export default function BirthAttestationPage() {
+   const nav = useNavigate();
+   const [fields, setFields] = useState<Field[]>([]);
+   const [price, setPrice] = useState<number | undefined>(undefined);
++  const [selectedService, setSelectedService] = useState('');
+   const [values, setValues] = useState<Record<string, string>>({});
+   const [imageErrors, setImageErrors] = useState<Record<string, string>>({});
+   const [consent, setConsent] = useState(false);
+@@ -133,109 +141,142 @@ export default function BirthAttestationPage() {
+ 
+         <PageHeader
+           title="Birth Attestation"
+-          subtitle="NPC Birth Attestation & Instant approval. Requests are reviewed and processed by an agent - modifications between 1 day and 5 years are allowed."
++          subtitle="NPC Birth Attestation & Instant approval. Requests are reviewed and processed by an agent."
+         />
+ 
+         <section className={FORM_SECTION_CLASSES}>
+-          <div className="flex flex-wrap items-center justify-between gap-3">
+-            <h2 className="font-display text-lg font-bold text-[#0b2f73]">NPC Birth Attestation &amp; Instant approval</h2>
+-            <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">Service cost: {money(price)}</span>
+-          </div>
++          <label className={FORM_LABEL_CLASSES}>
++            Choose Service:
++            <select
++              className={`mt-1 ${FORM_INPUT_CLASSES}`}
++              value={selectedService}
++              onChange={(e) => setSelectedService(e.target.value)}
++            >
++              <option value="">-- Select Service --</option>
++              <option value={SERVICE_OPTION_VALUE}>
++                NPC Birth Attestation &amp; Instant approval (max. of 5 hrs) ({money(price)})
++              </option>
++            </select>
++          </label>
++
++          {selectedService === SERVICE_OPTION_VALUE && (
++            <>
++              <div className="mt-4 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4">
++                <AlertTriangle size={18} className="mt-0.5 shrink-0 text-rose-600" />
++                <div>
++                  <p className="font-display text-sm font-bold text-rose-700">NOTE</p>
++                  <p className="mt-0.5 font-body text-sm text-rose-700">
++                    Dear customers, please be informed that only modifications between 1 day and 5 years are allowed.
++                  </p>
++                </div>
++              </div>
++
++              <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
++                <h2 className="font-display text-lg font-bold text-[#0b2f73]">NPC Birth Attestation &amp; Instant approval</h2>
++                <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">Service cost: {money(price)}</span>
++              </div>
+ 
+-          {!reference ? (
+-            <form onSubmit={prepare} className="mt-5 space-y-8">
+-              {sections.map((section) => (
+-                <div key={section.name}>
+-                  {section.name && <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wide text-[#0b2f73]/70">{section.name}</h3>}
+-                  <div className="grid gap-4 sm:grid-cols-2">
+-                    {section.fields.map((field) => (
+-                      <label key={field.key} className={field.input === 'image' ? `${FORM_LABEL_CLASSES} sm:col-span-2` : FORM_LABEL_CLASSES}>
+-                        {field.label}
+-                        {!field.required && <span className="ml-1 text-xs font-normal text-[#0b2f73]/40">(optional)</span>}
+-                        {field.input === 'select' ? (
+-                          <select
+-                            required={field.required}
+-                            className={`mt-1 ${FORM_INPUT_CLASSES}`}
+-                            value={values[field.key] ?? ''}
+-                            onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
+-                          >
+-                            <option value="">-- Select {field.label} --</option>
+-                            {field.options?.map((opt) => (
+-                              <option key={opt} value={opt}>
+-                                {opt}
+-                              </option>
+-                            ))}
+-                          </select>
+-                        ) : field.input === 'image' ? (
+-                          <div className="mt-1">
+-                            {values[field.key] ? (
+-                              <div className="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50 p-2">
+-                                <img src={values[field.key]} alt={field.label} className="h-16 w-16 rounded-lg object-cover" />
+-                                <div className="flex-1">
+-                                  <p className="font-body text-xs text-[#0b2f73]">Photo selected</p>
+-                                  <label className="cursor-pointer font-body text-xs font-semibold text-[#0b2f73] underline">
+-                                    Change photo
+-                                    <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => void handleImageSelect(field.key, e.target.files?.[0])} />
++              {!reference ? (
++                <form onSubmit={prepare} className="mt-5 space-y-8">
++                  {sections.map((section) => (
++                    <div key={section.name}>
++                      {section.name && <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wide text-[#0b2f73]/70">{section.name}</h3>}
++                      <div className="grid gap-4 sm:grid-cols-2">
++                        {section.fields.map((field) => (
++                          <label key={field.key} className={field.input === 'image' ? `${FORM_LABEL_CLASSES} sm:col-span-2` : FORM_LABEL_CLASSES}>
++                            {field.label}
++                            {!field.required && <span className="ml-1 text-xs font-normal text-[#0b2f73]/40">(optional)</span>}
++                            {field.input === 'select' ? (
++                              <select
++                                required={field.required}
++                                className={`mt-1 ${FORM_INPUT_CLASSES}`}
++                                value={values[field.key] ?? ''}
++                                onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
++                              >
++                                <option value="">-- Select {field.label} --</option>
++                                {field.options?.map((opt) => (
++                                  <option key={opt} value={opt}>
++                                    {opt}
++                                  </option>
++                                ))}
++                              </select>
++                            ) : field.input === 'image' ? (
++                              <div className="mt-1">
++                                {values[field.key] ? (
++                                  <div className="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50 p-2">
++                                    <img src={values[field.key]} alt={field.label} className="h-16 w-16 rounded-lg object-cover" />
++                                    <div className="flex-1">
++                                      <p className="font-body text-xs text-[#0b2f73]">Photo selected</p>
++                                      <label className="cursor-pointer font-body text-xs font-semibold text-[#0b2f73] underline">
++                                        Change photo
++                                        <input
++                                          type="file"
++                                          accept="image/png,image/jpeg,image/webp"
++                                          className="hidden"
++                                          onChange={(e) => void handleImageSelect(field.key, e.target.files?.[0])}
++                                        />
++                                      </label>
++                                    </div>
++                                    <button type="button" onClick={() => setValues((v) => ({ ...v, [field.key]: '' }))} className="font-body text-xs font-semibold text-rose-600">
++                                      Remove
++                                    </button>
++                                  </div>
++                                ) : (
++                                  <label className={`flex cursor-pointer items-center justify-center rounded-xl border border-dashed p-4 text-center ${FORM_INPUT_CLASSES}`}>
++                                    <span className="font-body text-xs text-[#0b2f73]/70">Tap to take a photo or upload one from your device</span>
++                                    <input
++                                      required={field.required}
++                                      type="file"
++                                      accept="image/png,image/jpeg,image/webp"
++                                      className="hidden"
++                                      onChange={(e) => void handleImageSelect(field.key, e.target.files?.[0])}
++                                    />
+                                   </label>
+-                                </div>
+-                                <button type="button" onClick={() => setValues((v) => ({ ...v, [field.key]: '' }))} className="font-body text-xs font-semibold text-rose-600">
+-                                  Remove
+-                                </button>
++                                )}
++                                {imageErrors[field.key] && <p className="mt-1 font-body text-xs text-rose-600">{imageErrors[field.key]}</p>}
+                               </div>
+                             ) : (
+-                              <label className={`flex cursor-pointer items-center justify-center rounded-xl border border-dashed p-4 text-center ${FORM_INPUT_CLASSES}`}>
+-                                <span className="font-body text-xs text-[#0b2f73]/70">Tap to take a photo or upload one from your device</span>
+-                                <input
+-                                  required={field.required}
+-                                  type="file"
+-                                  accept="image/png,image/jpeg,image/webp"
+-                                  className="hidden"
+-                                  onChange={(e) => void handleImageSelect(field.key, e.target.files?.[0])}
+-                                />
+-                              </label>
++                              <input
++                                required={field.required}
++                                type={field.input === 'date' ? 'date' : field.input === 'nin' ? 'tel' : 'text'}
++                                inputMode={field.input === 'nin' ? 'numeric' : undefined}
++                                maxLength={field.input === 'nin' ? 11 : undefined}
++                                className={`mt-1 ${FORM_INPUT_CLASSES}`}
++                                value={values[field.key] ?? ''}
++                                onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
++                              />
+                             )}
+-                            {imageErrors[field.key] && <p className="mt-1 font-body text-xs text-rose-600">{imageErrors[field.key]}</p>}
+-                          </div>
+-                        ) : (
+-                          <input
+-                            required={field.required}
+-                            type={field.input === 'date' ? 'date' : field.input === 'nin' ? 'tel' : 'text'}
+-                            inputMode={field.input === 'nin' ? 'numeric' : undefined}
+-                            maxLength={field.input === 'nin' ? 11 : undefined}
+-                            className={`mt-1 ${FORM_INPUT_CLASSES}`}
+-                            value={values[field.key] ?? ''}
+-                            onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
+-                          />
+-                        )}
+-                      </label>
+-                    ))}
+-                  </div>
+-                </div>
+-              ))}
++                          </label>
++                        ))}
++                      </div>
++                    </div>
++                  ))}
+ 
+-              <label className="flex items-start gap-2 font-body text-sm text-[#0b2f73]">
+-                <input type="checkbox" className="mt-0.5" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+-                By checking this box, you agree that the owner of the ID has granted you consent to verify his/her identity.
+-              </label>
++                  <label className="flex items-start gap-2 font-body text-sm text-[#0b2f73]">
++                    <input type="checkbox" className="mt-0.5" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
++                    By checking this box, you agree that the owner of the ID has granted you consent to verify his/her identity.
++                  </label>
+ 
+-              <div>
+-                <button
+-                  disabled={busy}
+-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b2f73] py-3 font-display font-semibold text-white disabled:opacity-60 sm:w-auto sm:px-8"
+-                >
+-                  {busy ? <Loader2 size={16} className="animate-spin" /> : 'Continue to PIN confirmation'}
+-                </button>
+-                {message && <p className="mt-3 rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>}
+-              </div>
+-            </form>
+-          ) : (
+-            <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-center">
+-              <p className="font-body text-sm font-semibold text-emerald-800">{message}</p>
+-              <p className="mt-1 font-body text-xs text-emerald-700">Reference: {reference}</p>
+-              <button onClick={() => setReference('')} className="mt-4 rounded-xl bg-[#0b2f73] px-5 py-2.5 font-display text-sm font-semibold text-white">
+-                Submit another request
+-              </button>
+-            </div>
++                  <div>
++                    <button
++                      disabled={busy}
++                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b2f73] py-3 font-display font-semibold text-white disabled:opacity-60 sm:w-auto sm:px-8"
++                    >
++                      {busy ? <Loader2 size={16} className="animate-spin" /> : 'Continue to PIN confirmation'}
++                    </button>
++                    {message && <p className="mt-3 rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>}
++                  </div>
++                </form>
++              ) : (
++                <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-center">
++                  <p className="font-body text-sm font-semibold text-emerald-800">{message}</p>
++                  <p className="mt-1 font-body text-xs text-emerald-700">Reference: {reference}</p>
++                  <button onClick={() => setReference('')} className="mt-4 rounded-xl bg-[#0b2f73] px-5 py-2.5 font-display text-sm font-semibold text-white">
++                    Submit another request
++                  </button>
++                </div>
++              )}
++            </>
+           )}
+ 
+           <div className="mt-8">
+diff --git a/web/src/pages/BvnCrmPage.tsx b/web/src/pages/BvnCrmPage.tsx
+new file mode 100644
+index 0000000..6943277
+--- /dev/null
++++ b/web/src/pages/BvnCrmPage.tsx
+@@ -0,0 +1,160 @@
++import { useEffect, useState, type FormEvent } from 'react';
++import { useNavigate } from 'react-router-dom';
++import { Download, Loader2 } from 'lucide-react';
++import AppShell from '../components/AppShell';
++import { api, ApiError } from '../lib/api';
++import { PinConfirmDialog } from '../components/PinConfirmDialog';
++import { PageHeader, FORM_SECTION_CLASSES, FORM_INPUT_CLASSES, FORM_LABEL_CLASSES, FORM_HELP_CLASSES, money } from '../components/verification/shared';
++
++type HistoryEntry = { reference: string; status: string; created_at: string; pdf_base64: string | null };
++
++export default function BvnCrmPage() {
++  const nav = useNavigate();
++  const [price, setPrice] = useState<number | undefined>(undefined);
++  const [ticketId, setTicketId] = useState('');
++  const [showPin, setShowPin] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const [message, setMessage] = useState('');
++  const [reference, setReference] = useState('');
++  const [history, setHistory] = useState<HistoryEntry[]>([]);
++  const [loadingHistory, setLoadingHistory] = useState(true);
++
++  useEffect(() => {
++    api
++      .get<{ data: { unit_price: number } }>('/bvn-crm/price')
++      .then((res) => setPrice(res.data.unit_price))
++      .catch(() => setMessage('Unable to load this form. Please refresh and try again.'));
++    loadHistory();
++  }, []);
++
++  async function loadHistory() {
++    setLoadingHistory(true);
++    try {
++      const result = await api.get<{ data: HistoryEntry[] }>('/bvn-crm/history');
++      setHistory(result.data ?? []);
++    } catch {
++      setHistory([]);
++    } finally {
++      setLoadingHistory(false);
++    }
++  }
++
++  function prepare(event: FormEvent) {
++    event.preventDefault();
++    if (!/^\d{8}$/.test(ticketId.trim())) {
++      setMessage('Please enter a valid 8-digit TicketID.');
++      return;
++    }
++    setMessage('');
++    setShowPin(true);
++  }
++
++  async function submit(pin: string) {
++    setShowPin(false);
++    setBusy(true);
++    setMessage('');
++    try {
++      const result = await api.post<{ status: boolean; message: string; data: { reference: string } }>('/bvn-crm/submit', {
++        ticket_id: ticketId.trim(),
++        pin
++      });
++      setReference(result.data.reference);
++      setMessage(result.message);
++      setTicketId('');
++      void loadHistory();
++    } catch (error) {
++      setMessage(error instanceof ApiError ? error.message : 'Request failed. Please try again.');
++    } finally {
++      setBusy(false);
++    }
++  }
++
++  return (
++    <AppShell>
++      <div className="mx-auto max-w-4xl">
++        <button onClick={() => nav('/dashboard')} className="font-body text-sm font-semibold text-[#0b2f73]">
++          ← Dashboard
++        </button>
++
++        <PageHeader title="BVN CRM" subtitle="Submit your BVN CRM TicketID for follow-up. Requests are reviewed and processed by an agent." />
++
++        <section className={FORM_SECTION_CLASSES}>
++          <div className="flex flex-wrap items-center justify-between gap-3">
++            <h2 className="font-display text-lg font-bold text-[#0b2f73]">BVN CRM Ticket Follow-up</h2>
++            <span className="rounded-full bg-gold-500/15 px-4 py-2 font-body text-sm font-bold text-gold-700">Service cost: {money(price)}</span>
++          </div>
++          <p className={`mt-1 ${FORM_HELP_CLASSES}`}>Your request will be processed within 24 - 48hrs.</p>
++
++          {!reference ? (
++            <form onSubmit={prepare} className="mt-5 space-y-6">
++              <label className={FORM_LABEL_CLASSES}>
++                Submit your 8 DIGITS TicketID looks like: 88248XXX
++                <input
++                  required
++                  type="tel"
++                  inputMode="numeric"
++                  maxLength={8}
++                  placeholder="e.g. 88248XXX"
++                  className={`mt-1 ${FORM_INPUT_CLASSES}`}
++                  value={ticketId}
++                  onChange={(e) => setTicketId(e.target.value.replace(/\D/g, '').slice(0, 8))}
++                />
++              </label>
++
++              <div>
++                <button
++                  disabled={busy}
++                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b2f73] py-3 font-display font-semibold text-white disabled:opacity-60"
++                >
++                  {busy ? <Loader2 size={16} className="animate-spin" /> : 'Submit'}
++                </button>
++                {message && <p className="mt-3 rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>}
++              </div>
++            </form>
++          ) : (
++            <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-center">
++              <p className="font-body text-sm font-semibold text-emerald-800">{message}</p>
++              <p className="mt-1 font-body text-xs text-emerald-700">Reference: {reference}</p>
++              <button onClick={() => setReference('')} className="mt-4 rounded-xl bg-[#0b2f73] px-5 py-2.5 font-display text-sm font-semibold text-white">
++                Submit another request
++              </button>
++            </div>
++          )}
++
++          <div className="mt-8">
++            <h3 className={FORM_LABEL_CLASSES}>Recent requests</h3>
++            {loadingHistory ? (
++              <p className={`mt-2 ${FORM_HELP_CLASSES}`}>Loading…</p>
++            ) : history.length === 0 ? (
++              <p className={`mt-2 ${FORM_HELP_CLASSES}`}>No requests yet.</p>
++            ) : (
++              <ul className="mt-2 space-y-2">
++                {history.map((entry) => (
++                  <li key={entry.reference} className="flex items-center justify-between rounded-xl border border-blue-100 bg-blue-50 p-3 font-body text-xs text-[#0b2f73]">
++                    <span>
++                      {entry.reference} · {new Date(entry.created_at).toLocaleString()} ·{' '}
++                      <span
++                        className={
++                          entry.status === 'success' ? 'font-semibold text-emerald-700' : entry.status === 'failed' ? 'font-semibold text-rose-600' : 'font-semibold text-amber-600'
++                        }
++                      >
++                        {entry.status === 'pending' ? 'Under review' : entry.status}
++                      </span>
++                    </span>
++                    {entry.pdf_base64 && (
++                      <a href={`data:application/pdf;base64,${entry.pdf_base64}`} download={`${entry.reference}.pdf`} className="flex items-center gap-1 font-semibold text-[#0b2f73]">
++                        <Download size={12} /> PDF
++                      </a>
++                    )}
++                  </li>
++                ))}
++              </ul>
++            )}
++          </div>
++        </section>
++      </div>
++
++      <PinConfirmDialog open={showPin} onClose={() => setShowPin(false)} onVerified={submit} />
++    </AppShell>
++  );
++}
+diff --git a/web/src/pages/NewspaperPublicationPage.tsx b/web/src/pages/NewspaperPublicationPage.tsx
+index f55743e..e71e7e9 100644
+--- a/web/src/pages/NewspaperPublicationPage.tsx
++++ b/web/src/pages/NewspaperPublicationPage.tsx
+@@ -9,10 +9,17 @@ import { PageHeader, FORM_SECTION_CLASSES, FORM_INPUT_CLASSES, FORM_LABEL_CLASSE
+ type Field = { key: string; label: string; required: boolean };
+ type HistoryEntry = { reference: string; status: string; created_at: string; pdf_base64: string | null };
+ 
++// Only one real service exists today ("Name only or Name & DoB Publication"),
++// but the reference design still gates the form behind a native <select>
++// "Choose Service" dropdown rather than showing the fields immediately -
++// this mirrors that exact UX (see the reference screenshots).
++const SERVICE_OPTION_VALUE = 'name_or_name_dob';
++
+ export default function NewspaperPublicationPage() {
+   const nav = useNavigate();
+   const [fields, setFields] = useState<Field[]>([]);
+   const [price, setPrice] = useState<number | undefined>(undefined);
++  const [selectedService, setSelectedService] = useState('');
+   const [values, setValues] = useState<Record<string, string>>({});
+   const [confirmed, setConfirmed] = useState(false);
+   const [showPin, setShowPin] = useState(false);
+@@ -93,58 +100,76 @@ export default function NewspaperPublicationPage() {
+           <p className={`mt-1 ${FORM_HELP_CLASSES}`}>BluePrint or DailyTrust only. Submit before 5:30pm Monday to Friday only. Duration is 20hrs.</p>
+ 
+           {!reference ? (
+-            <form onSubmit={prepare} className="mt-5 space-y-6">
+-              <div>
+-                <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wide text-[#0b2f73]/70">Old Details</h3>
+-                <div className="grid gap-4 sm:grid-cols-2">
+-                  {oldFields.map((field) => (
+-                    <label key={field.key} className={FORM_LABEL_CLASSES}>
+-                      {field.label}
+-                      {!field.required && <span className="ml-1 text-xs font-normal text-[#0b2f73]/40">(optional)</span>}
+-                      <input
+-                        required={field.required}
+-                        className={`mt-1 ${FORM_INPUT_CLASSES}`}
+-                        value={values[field.key] ?? ''}
+-                        onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
+-                      />
+-                    </label>
+-                  ))}
+-                </div>
+-              </div>
+-
+-              <div>
+-                <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wide text-[#0b2f73]/70">New Details</h3>
+-                <div className="grid gap-4 sm:grid-cols-2">
+-                  {newFields.map((field) => (
+-                    <label key={field.key} className={FORM_LABEL_CLASSES}>
+-                      {field.label}
+-                      {!field.required && <span className="ml-1 text-xs font-normal text-[#0b2f73]/40">(optional)</span>}
+-                      <input
+-                        required={field.required}
+-                        className={`mt-1 ${FORM_INPUT_CLASSES}`}
+-                        value={values[field.key] ?? ''}
+-                        onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
+-                      />
+-                    </label>
+-                  ))}
+-                </div>
+-              </div>
+-
+-              <label className="flex items-start gap-2 font-body text-sm text-[#0b2f73]">
+-                <input type="checkbox" className="mt-0.5" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
+-                I confirm that the newspaper publication details and affidavit are correct.
++            <div className="mt-5">
++              <label className={FORM_LABEL_CLASSES}>
++                Choose Service:
++                <select
++                  className={`mt-1 ${FORM_INPUT_CLASSES}`}
++                  value={selectedService}
++                  onChange={(e) => setSelectedService(e.target.value)}
++                >
++                  <option value="">-- Select Service --</option>
++                  <option value={SERVICE_OPTION_VALUE}>
++                    Name only or Name &amp; DoB Publication (BluePrint or DailyTrust only) Submit bfre 5:30pm Monday to Fri. only. Duration is 20hrs ({money(price)})
++                  </option>
++                </select>
+               </label>
+ 
+-              <div>
+-                <button
+-                  disabled={busy}
+-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b2f73] py-3 font-display font-semibold text-white disabled:opacity-60"
+-                >
+-                  {busy ? <Loader2 size={16} className="animate-spin" /> : 'Submit'}
+-                </button>
+-                {message && <p className="mt-3 rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>}
+-              </div>
+-            </form>
++              {selectedService === SERVICE_OPTION_VALUE && (
++                <form onSubmit={prepare} className="mt-6 space-y-6">
++                  <div>
++                    <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wide text-[#0b2f73]/70">Old Details</h3>
++                    <div className="grid gap-4 sm:grid-cols-2">
++                      {oldFields.map((field) => (
++                        <label key={field.key} className={FORM_LABEL_CLASSES}>
++                          {field.label}
++                          {!field.required && <span className="ml-1 text-xs font-normal text-[#0b2f73]/40">(optional)</span>}
++                          <input
++                            required={field.required}
++                            className={`mt-1 ${FORM_INPUT_CLASSES}`}
++                            value={values[field.key] ?? ''}
++                            onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
++                          />
++                        </label>
++                      ))}
++                    </div>
++                  </div>
++
++                  <div>
++                    <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wide text-[#0b2f73]/70">New Details</h3>
++                    <div className="grid gap-4 sm:grid-cols-2">
++                      {newFields.map((field) => (
++                        <label key={field.key} className={FORM_LABEL_CLASSES}>
++                          {field.label}
++                          {!field.required && <span className="ml-1 text-xs font-normal text-[#0b2f73]/40">(optional)</span>}
++                          <input
++                            required={field.required}
++                            className={`mt-1 ${FORM_INPUT_CLASSES}`}
++                            value={values[field.key] ?? ''}
++                            onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
++                          />
++                        </label>
++                      ))}
++                    </div>
++                  </div>
++
++                  <label className="flex items-start gap-2 font-body text-sm text-[#0b2f73]">
++                    <input type="checkbox" className="mt-0.5" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
++                    I confirm that the newspaper publication details and affidavit are correct.
++                  </label>
++
++                  <div>
++                    <button
++                      disabled={busy}
++                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b2f73] py-3 font-display font-semibold text-white disabled:opacity-60"
++                    >
++                      {busy ? <Loader2 size={16} className="animate-spin" /> : 'Submit'}
++                    </button>
++                    {message && <p className="mt-3 rounded-lg bg-blue-50 p-3 font-body text-sm text-[#0b2f73]">{message}</p>}
++                  </div>
++                </form>
++              )}
++            </div>
+           ) : (
+             <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-center">
+               <p className="font-body text-sm font-semibold text-emerald-800">{message}</p>
+-- 
+2.43.0
+

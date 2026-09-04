@@ -16,6 +16,7 @@ import { registerNinModificationRoutes } from './nin-modification.js';
 import { registerBvnModificationRoutes } from './bvn-modification.js';
 import { registerBirthAttestationRoutes } from './birth-attestation.js';
 import { registerNewspaperPublicationRoutes } from './newspaper-publication.js';
+import { registerBvnCrmRoutes } from './bvn-crm.js';
 import { registerBvnLicenseRoutes } from './bvn-license-onboarding.js';
 import { registerCacRoutes } from './cac.js';
 import { componentLoader, Components } from './component-loader.js';
@@ -191,6 +192,7 @@ export async function buildAdminRouter() {
   registerBvnModificationRoutes(router);
   registerBirthAttestationRoutes(router);
   registerNewspaperPublicationRoutes(router);
+  registerBvnCrmRoutes(router);
   registerBvnLicenseRoutes(router);
   registerCacRoutes(router);
   registerUserDeliveryRoutes(router);
