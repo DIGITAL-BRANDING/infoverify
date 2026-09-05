@@ -131,13 +131,14 @@ const NIN_BY_PHONE_PATH: Record<Exclude<TechhubSlipTier, 'vnin'>, string> = {
   regular: 'nin_by_phone_regular.php'
 };
 
-// Techhub's docs only ever showed the Premium slip's exact filename
-// (bvn_premium_slip.php); Standard is inferred from the same naming
-// pattern every other tiered endpoint above uses. Confirm against the
-// dashboard if BVN Standard slip requests start failing.
+// Confirmed against https://techhubltd.co/documentation.php#sec-bvn:
+// Premium -> bvn_premium_slip.php, Standard -> bvn_full_details_slip.php.
+// (Standard was previously guessed as 'bvn_standard_slip.php', following
+// the naming pattern every other tiered endpoint above uses - that guess
+// was wrong and caused every BVN Standard slip request to 404.)
 const BVN_SLIP_PATH: Record<TechhubBvnTier, string> = {
   premium: 'bvn_premium_slip.php',
-  standard: 'bvn_standard_slip.php'
+  standard: 'bvn_full_details_slip.php'
 };
 
 function mockPdfBase64() {
