@@ -48,6 +48,18 @@ const quickLinks: QuickLink[] = [
     icon: 'Edit3'
   },
   {
+    label: 'Birth Attestation Requests',
+    description: 'NPC Birth Attestation submissions awaiting manual processing',
+    href: `${ADMIN_ROOT_PATH}/resources/Transaction?filters.type=BIRTH_ATTESTATION`,
+    icon: 'FileText'
+  },
+  {
+    label: 'Newspaper Publication Requests',
+    description: 'Name-change publications awaiting filing with BluePrint/DailyTrust',
+    href: `${ADMIN_ROOT_PATH}/resources/Transaction?filters.type=NEWSPAPER_PUBLICATION`,
+    icon: 'BookOpen'
+  },
+  {
     label: 'User Wallet Activity',
     description: 'Look up any customer: funding, spend & recent transactions',
     href: `${ADMIN_ROOT_PATH}/user-wallet`,
@@ -133,8 +145,9 @@ const quickLinks: QuickLink[] = [
 // Shown once per dashboard visit (mount) so an admin logging in - or just
 // navigating back to the dashboard - immediately sees what's backed up
 // across every manually-processed request type (CAC, BVN License, BVN
-// Modification, NIN Modification), instead of having to click through each
-// "Requests" tile individually to discover a queue has built up. Powered by
+// Modification, NIN Modification, Birth Attestation, Newspaper
+// Publication), instead of having to click through each "Requests" tile
+// individually to discover a queue has built up. Powered by
 // GET /api/admin/pending-summary (routes/admin-api.routes.ts).
 function PendingRequestsPopup() {
   const [summary, setSummary] = useState<PendingSummary | null>(null);

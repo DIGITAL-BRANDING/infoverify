@@ -12,10 +12,11 @@ declare module 'express-session' {
 /**
  * Powers the "unresolved requests" popup shown on the admin dashboard
  * (components/dashboard.tsx) - a quick summary of every manually-processed
- * request type (CAC, BVN License, BVN Modification, NIN Modification)
- * still sitting PENDING, plus how many of each arrived in the last 24
- * hours, so an admin logging in immediately sees what's backed up without
- * clicking through every "Requests" tile individually.
+ * request type (CAC, BVN License, BVN Modification, NIN Modification,
+ * Birth Attestation, Newspaper Publication) still sitting PENDING, plus how
+ * many of each arrived in the last 24 hours, so an admin logging in
+ * immediately sees what's backed up without clicking through every
+ * "Requests" tile individually.
  *
  * This is registered on the SAME router AdminJS itself uses (see
  * setup.ts), which shares AdminJS's own session/cookie
@@ -28,7 +29,9 @@ const PENDING_SUMMARY_TYPES: { type: TransactionType; label: string }[] = [
   { type: TransactionType.CAC_SERVICE_REQUEST, label: 'CAC Registration' },
   { type: TransactionType.BVN_LICENSE_ONBOARDING, label: 'BVN License Enrollment' },
   { type: TransactionType.BVN_MODIFICATION, label: 'BVN Modification' },
-  { type: TransactionType.NIN_MODIFICATION, label: 'NIN Modification' }
+  { type: TransactionType.NIN_MODIFICATION, label: 'NIN Modification' },
+  { type: TransactionType.BIRTH_ATTESTATION, label: 'Birth Attestation' },
+  { type: TransactionType.NEWSPAPER_PUBLICATION, label: 'Newspaper Publication' }
 ];
 
 export function registerPendingSummaryRoutes(router: Router) {

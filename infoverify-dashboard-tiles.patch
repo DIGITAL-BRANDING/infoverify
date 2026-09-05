@@ -1,0 +1,99 @@
+From a2faf15a25129c8555111421ebc7e91594d5f6a0 Mon Sep 17 00:00:00 2001
+From: Claude <dev@infoverify.local>
+Date: Sat, 5 Sep 2026 17:59:55 +0000
+Subject: [PATCH] Add Birth Attestation and Newspaper Publication tiles to the
+ admin dashboard
+
+The manage pages/backend from the last patch were already live, but
+nothing linked to them from the dashboard - dashboard.tsx's quickLinks
+array and pending-summary.ts's PENDING_SUMMARY_TYPES both had a fixed
+list of 4 request types (CAC, BVN License, BVN Modification, NIN
+Modification) that simply predated these two new types, so neither the
+'Quick links' tiles nor the 'Requests waiting on you' popup ever
+mentioned them - not a bug in either file, just two lists that needed
+the same two entries added that every other request type already has.
+
+- dashboard.tsx: two new quickLinks entries (Birth Attestation
+  Requests, Newspaper Publication Requests), same href pattern as the
+  existing four (Transaction list filtered by type).
+- pending-summary.ts: same two types added to PENDING_SUMMARY_TYPES,
+  so the pending-count popup picks them up too.
+
+Verified: all 173 backend tests still pass; tsc shows zero new errors
+on either touched file (pending-summary.ts's two errors are the same
+pre-existing stale-Prisma-client class already noted on prior patches
+in this session).
+---
+ .../src/admin/components/dashboard.tsx          | 17 +++++++++++++++--
+ maria_backend/src/admin/pending-summary.ts      | 13 ++++++++-----
+ 2 files changed, 23 insertions(+), 7 deletions(-)
+
+diff --git a/maria_backend/src/admin/components/dashboard.tsx b/maria_backend/src/admin/components/dashboard.tsx
+index f4a2348..2687717 100644
+--- a/maria_backend/src/admin/components/dashboard.tsx
++++ b/maria_backend/src/admin/components/dashboard.tsx
+@@ -47,6 +47,18 @@ const quickLinks: QuickLink[] = [
+     href: `${ADMIN_ROOT_PATH}/resources/Transaction?filters.type=BVN_MODIFICATION`,
+     icon: 'Edit3'
+   },
++  {
++    label: 'Birth Attestation Requests',
++    description: 'NPC Birth Attestation submissions awaiting manual processing',
++    href: `${ADMIN_ROOT_PATH}/resources/Transaction?filters.type=BIRTH_ATTESTATION`,
++    icon: 'FileText'
++  },
++  {
++    label: 'Newspaper Publication Requests',
++    description: 'Name-change publications awaiting filing with BluePrint/DailyTrust',
++    href: `${ADMIN_ROOT_PATH}/resources/Transaction?filters.type=NEWSPAPER_PUBLICATION`,
++    icon: 'BookOpen'
++  },
+   {
+     label: 'User Wallet Activity',
+     description: 'Look up any customer: funding, spend & recent transactions',
+@@ -133,8 +145,9 @@ const quickLinks: QuickLink[] = [
+ // Shown once per dashboard visit (mount) so an admin logging in - or just
+ // navigating back to the dashboard - immediately sees what's backed up
+ // across every manually-processed request type (CAC, BVN License, BVN
+-// Modification, NIN Modification), instead of having to click through each
+-// "Requests" tile individually to discover a queue has built up. Powered by
++// Modification, NIN Modification, Birth Attestation, Newspaper
++// Publication), instead of having to click through each "Requests" tile
++// individually to discover a queue has built up. Powered by
+ // GET /api/admin/pending-summary (routes/admin-api.routes.ts).
+ function PendingRequestsPopup() {
+   const [summary, setSummary] = useState<PendingSummary | null>(null);
+diff --git a/maria_backend/src/admin/pending-summary.ts b/maria_backend/src/admin/pending-summary.ts
+index b6f8984..ce9688b 100644
+--- a/maria_backend/src/admin/pending-summary.ts
++++ b/maria_backend/src/admin/pending-summary.ts
+@@ -12,10 +12,11 @@ declare module 'express-session' {
+ /**
+  * Powers the "unresolved requests" popup shown on the admin dashboard
+  * (components/dashboard.tsx) - a quick summary of every manually-processed
+- * request type (CAC, BVN License, BVN Modification, NIN Modification)
+- * still sitting PENDING, plus how many of each arrived in the last 24
+- * hours, so an admin logging in immediately sees what's backed up without
+- * clicking through every "Requests" tile individually.
++ * request type (CAC, BVN License, BVN Modification, NIN Modification,
++ * Birth Attestation, Newspaper Publication) still sitting PENDING, plus how
++ * many of each arrived in the last 24 hours, so an admin logging in
++ * immediately sees what's backed up without clicking through every
++ * "Requests" tile individually.
+  *
+  * This is registered on the SAME router AdminJS itself uses (see
+  * setup.ts), which shares AdminJS's own session/cookie
+@@ -28,7 +29,9 @@ const PENDING_SUMMARY_TYPES: { type: TransactionType; label: string }[] = [
+   { type: TransactionType.CAC_SERVICE_REQUEST, label: 'CAC Registration' },
+   { type: TransactionType.BVN_LICENSE_ONBOARDING, label: 'BVN License Enrollment' },
+   { type: TransactionType.BVN_MODIFICATION, label: 'BVN Modification' },
+-  { type: TransactionType.NIN_MODIFICATION, label: 'NIN Modification' }
++  { type: TransactionType.NIN_MODIFICATION, label: 'NIN Modification' },
++  { type: TransactionType.BIRTH_ATTESTATION, label: 'Birth Attestation' },
++  { type: TransactionType.NEWSPAPER_PUBLICATION, label: 'Newspaper Publication' }
+ ];
+ 
+ export function registerPendingSummaryRoutes(router: Router) {
+-- 
+2.43.0
+
