@@ -1,7 +1,7 @@
 import PDFDocument from 'pdfkit';
 import { Prisma, TransactionStatus, TransactionType } from '@prisma/client';
 import { koboToNaira } from '../lib/money.js';
-import { sealPII, openPII } from '../lib/pii.js';
+import { sealPII, openPII, mergeSealedPII } from '../lib/pii.js';
 import { prisma } from '../lib/prisma.js';
 import { ApiError } from '../middleware/error.js';
 import { debitWallet } from './wallet.service.js';
@@ -194,7 +194,26 @@ export async function listNewspaperPublicationHistory(params: { userId: string }
   });
 }
 
-export async function completeNewspaperPublication(params: { transactionId: string }) {
+/** Admin-only: leaves a free-text progress note visible to the customer on
+ *  their Newspaper Publication history, without changing the transaction's
+ *  status. Same shape as cac.service.ts's updateCacProgressNotes(). */
+export async function updateNewspaperPublicationProgressNotes(params: { transactionId: string; notes: string }) {
+  const transaction = await prisma.transaction.findUnique({ where: { id: params.transactionId } });
+  if (!transaction || transaction.type !== TransactionType.NEWSPAPER_PUBLICATION) {
+    throw new ApiError(404, 'Newspaper Publication transaction not found', 'TRANSACTION_NOT_FOUND');
+  }
+  const metadata = (transaction.metadata as Record<string, unknown> | null) ?? {};
+  await prisma.transaction.update({
+    where: { id: transaction.id },
+    data: { metadata: { ...metadata, progress_notes: params.notes } as Prisma.InputJsonValue }
+  });
+}
+
+/** Called from the manage page once the newspaper cutting has actually been
+ *  placed - attaches that final proof (scanned cutting/affidavit) and marks
+ *  the request SUCCESS. No wallet movement - the customer was already
+ *  charged at submit time. */
+export async function completeNewspaperPublication(params: { transactionId: string; publicationPdfBase64: string }) {
   const transaction = await prisma.transaction.findUnique({ where: { id: params.transactionId } });
   if (!transaction || transaction.type !== TransactionType.NEWSPAPER_PUBLICATION) {
     throw new ApiError(404, 'Newspaper Publication transaction not found', 'TRANSACTION_NOT_FOUND');
@@ -202,10 +221,24 @@ export async function completeNewspaperPublication(params: { transactionId: stri
   if (transaction.status !== TransactionStatus.PENDING) {
     throw new ApiError(422, 'Only a pending request can be marked complete', 'INVALID_STATUS');
   }
-  return prisma.transaction.update({ where: { id: transaction.id }, data: { status: TransactionStatus.SUCCESS } });
+
+  const metadata = (transaction.metadata as Record<string, unknown> | null) ?? {};
+  await prisma.transaction.update({
+    where: { id: transaction.id },
+    data: {
+      status: TransactionStatus.SUCCESS,
+      metadata: {
+        ...metadata,
+        pii: mergeSealedPII(metadata.pii, { publication_pdf_base64: params.publicationPdfBase64 })
+      } as Prisma.InputJsonValue
+    }
+  });
 }
 
+/** Decrypts the sealed PII (submitted values, the auto-generated submission
+ *  PDF, and - once completed - the final published cutting/proof) for the
+ *  admin's manage page. Never call this from a user-facing endpoint. */
 export function decryptNewspaperPublicationPII(transaction: { metadata: unknown }) {
   const metadata = transaction.metadata as Record<string, unknown> | null;
-  return openPII<Record<string, unknown> & { pdf_base64?: string }>(metadata?.pii);
+  return openPII<Record<string, unknown> & { pdf_base64?: string; publication_pdf_base64?: string }>(metadata?.pii);
 }

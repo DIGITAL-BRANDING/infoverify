@@ -32,8 +32,8 @@ const TARGET_PATH_BY_TYPE: Record<string, (id: string) => string> = {
   NIN_MODIFICATION: (id) => `/admin/nin-modification/${id}/pdf`,
   BVN_LICENSE_ONBOARDING: (id) => `/admin/bvn-license/${id}/pdf`,
   BVN_MODIFICATION: (id) => `/admin/bvn-modification/${id}/pdf`,
-  BIRTH_ATTESTATION: (id) => `/admin/birth-attestation/${id}/pdf`,
-  NEWSPAPER_PUBLICATION: (id) => `/admin/newspaper-publication/${id}/pdf`,
+  BIRTH_ATTESTATION: (id) => `/admin/birth-attestation/${id}/manage`,
+  NEWSPAPER_PUBLICATION: (id) => `/admin/newspaper-publication/${id}/manage`,
   BVN_CRM: (id) => `/admin/bvn-crm/${id}/pdf`
 };
 

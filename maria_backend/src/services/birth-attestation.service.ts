@@ -1,7 +1,7 @@
 import PDFDocument from 'pdfkit';
 import { Prisma, TransactionStatus, TransactionType } from '@prisma/client';
 import { koboToNaira } from '../lib/money.js';
-import { sealPII, openPII } from '../lib/pii.js';
+import { sealPII, openPII, mergeSealedPII } from '../lib/pii.js';
 import { prisma } from '../lib/prisma.js';
 import { ApiError } from '../middleware/error.js';
 import { debitWallet } from './wallet.service.js';
@@ -266,7 +266,28 @@ export async function listBirthAttestationHistory(params: { userId: string }) {
  *  actually processed it. No wallet movement - the customer was already
  *  charged at submit time. Rejection uses the existing generic
  *  refundWallet()/"reverse" admin action. */
-export async function completeBirthAttestation(params: { transactionId: string }) {
+/** Admin-only: leaves a free-text progress note visible to the customer on
+ *  their Birth Attestation history, without changing the transaction's
+ *  status. Same shape as cac.service.ts's updateCacProgressNotes(). */
+export async function updateBirthAttestationProgressNotes(params: { transactionId: string; notes: string }) {
+  const transaction = await prisma.transaction.findUnique({ where: { id: params.transactionId } });
+  if (!transaction || transaction.type !== TransactionType.BIRTH_ATTESTATION) {
+    throw new ApiError(404, 'Birth Attestation transaction not found', 'TRANSACTION_NOT_FOUND');
+  }
+  const metadata = (transaction.metadata as Record<string, unknown> | null) ?? {};
+  await prisma.transaction.update({
+    where: { id: transaction.id },
+    data: { metadata: { ...metadata, progress_notes: params.notes } as Prisma.InputJsonValue }
+  });
+}
+
+/** Called from the manage page once NPC has actually issued the attestation
+ *  - attaches that final document (same mergeSealedPII approach as
+ *  cac.service.ts's completeCacRequest()) and marks the request SUCCESS. No
+ *  wallet movement - the customer was already charged at submit time.
+ *  Rejection still uses the existing generic refundWallet()/"reverse"
+ *  admin action. */
+export async function completeBirthAttestation(params: { transactionId: string; attestationPdfBase64: string }) {
   const transaction = await prisma.transaction.findUnique({ where: { id: params.transactionId } });
   if (!transaction || transaction.type !== TransactionType.BIRTH_ATTESTATION) {
     throw new ApiError(404, 'Birth Attestation transaction not found', 'TRANSACTION_NOT_FOUND');
@@ -274,12 +295,24 @@ export async function completeBirthAttestation(params: { transactionId: string }
   if (transaction.status !== TransactionStatus.PENDING) {
     throw new ApiError(422, 'Only a pending request can be marked complete', 'INVALID_STATUS');
   }
-  return prisma.transaction.update({ where: { id: transaction.id }, data: { status: TransactionStatus.SUCCESS } });
+
+  const metadata = (transaction.metadata as Record<string, unknown> | null) ?? {};
+  await prisma.transaction.update({
+    where: { id: transaction.id },
+    data: {
+      status: TransactionStatus.SUCCESS,
+      metadata: {
+        ...metadata,
+        pii: mergeSealedPII(metadata.pii, { attestation_pdf_base64: params.attestationPdfBase64 })
+      } as Prisma.InputJsonValue
+    }
+  });
 }
 
-/** Decrypts the sealed PII (including the generated PDF) for the admin's
- *  PDF-download route. Never call this from a user-facing endpoint. */
+/** Decrypts the sealed PII (submitted values, the auto-generated submission
+ *  PDF, and - once completed - the final NPC attestation document) for the
+ *  admin's manage page. Never call this from a user-facing endpoint. */
 export function decryptBirthAttestationPII(transaction: { metadata: unknown }) {
   const metadata = transaction.metadata as Record<string, unknown> | null;
-  return openPII<Record<string, unknown> & { pdf_base64?: string }>(metadata?.pii);
+  return openPII<Record<string, unknown> & { pdf_base64?: string; attestation_pdf_base64?: string }>(metadata?.pii);
 }

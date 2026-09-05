@@ -4,8 +4,6 @@ import { prisma } from '../../lib/prisma.js';
 import { decryptTransactionPII } from '../../services/verification.service.js';
 import { completeModification } from '../../services/nin-modification.service.js';
 import { completeBvnModification } from '../../services/bvn-modification.service.js';
-import { completeBirthAttestation } from '../../services/birth-attestation.service.js';
-import { completeNewspaperPublication } from '../../services/newspaper-publication.service.js';
 import { completeBvnCrm } from '../../services/bvn-crm.service.js';
 import { TransactionStatus } from '@prisma/client';
 import { refundWallet } from '../../services/wallet.service.js';
@@ -293,123 +291,31 @@ export const transactionResource: ResourceWithOptions = {
           return { record: record.toJSON(currentAdmin) };
         }
       },
-      // Same two actions as completeBvnModification/downloadBvnModificationPdf
-      // above, for BIRTH_ATTESTATION rows - see birth-attestation.service.ts.
-      completeBirthAttestation: {
-        actionType: 'record',
-        icon: 'CheckCircle',
-        guard: 'Mark this Birth Attestation request as completed? Only do this after NPC has actually processed it.',
+      // Like manageCacRequest below: a real form (details + a progress
+      // note + a final-document upload), not a single confirm-guard click,
+      // so this redirects to a dedicated manage page instead of an inline
+      // handler. See birth-attestation.service.ts / admin/birth-attestation.ts.
+      manageBirthAttestation: {
+        actionType: 'record', icon: 'Edit', component: Components.RedirectToManage,
         isAccessible: ({ currentAdmin, record }) => {
           const admin = currentAdmin as unknown as AdminSessionUser | undefined;
-          if (!admin || admin.role === 'SUPPORT') return false;
-          return record?.params?.type === 'BIRTH_ATTESTATION' && record?.params?.status === 'PENDING';
+          return !!admin && admin.role !== 'SUPPORT' && record?.params?.type === 'BIRTH_ATTESTATION';
         },
-        handler: async (request, response, context) => {
-          const { record, currentAdmin } = context;
-          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
-          if (!record || !admin) {
-            throw new Error('Missing record or admin context');
-          }
-
-          try {
-            await completeBirthAttestation({ transactionId: record.params.id as string });
-
-            await logAdminAction({
-              adminId: admin.id,
-              action: 'COMPLETE_BIRTH_ATTESTATION',
-              targetType: 'Transaction',
-              targetId: record.params.id as string,
-              metadata: { reference: record.params.reference }
-            });
-
-            return {
-              record: record.toJSON(currentAdmin),
-              notice: { message: 'Marked as completed.', type: 'success' }
-            };
-          } catch (error) {
-            return {
-              record: record.toJSON(currentAdmin),
-              notice: {
-                message: error instanceof Error ? error.message : 'Could not mark this as completed',
-                type: 'error'
-              }
-            };
-          }
-        }
-      },
-      downloadBirthAttestationPdf: {
-        actionType: 'record',
-        icon: 'Download',
-        component: Components.RedirectToManage,
-        isAccessible: ({ currentAdmin, record }) => {
-          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
-          return admin?.role === 'SUPER_ADMIN' && record?.params?.type === 'BIRTH_ATTESTATION';
-        },
-        handler: async (request, response, context) => {
-          const { record, currentAdmin } = context;
-          if (!record) {
-            throw new Error('Missing record');
-          }
+        handler: async (_request, _response, context) => {
+          const { record, currentAdmin } = context; if (!record) throw new Error('Missing record');
           return { record: record.toJSON(currentAdmin) };
         }
       },
-      // Same pair again, for NEWSPAPER_PUBLICATION rows - see
-      // newspaper-publication.service.ts.
-      completeNewspaperPublication: {
-        actionType: 'record',
-        icon: 'CheckCircle',
-        guard: 'Mark this Newspaper Publication request as completed? Only do this after the publication has actually been placed.',
+      // Same shape again, for NEWSPAPER_PUBLICATION rows - see
+      // newspaper-publication.service.ts / admin/newspaper-publication.ts.
+      manageNewspaperPublication: {
+        actionType: 'record', icon: 'Edit', component: Components.RedirectToManage,
         isAccessible: ({ currentAdmin, record }) => {
           const admin = currentAdmin as unknown as AdminSessionUser | undefined;
-          if (!admin || admin.role === 'SUPPORT') return false;
-          return record?.params?.type === 'NEWSPAPER_PUBLICATION' && record?.params?.status === 'PENDING';
+          return !!admin && admin.role !== 'SUPPORT' && record?.params?.type === 'NEWSPAPER_PUBLICATION';
         },
-        handler: async (request, response, context) => {
-          const { record, currentAdmin } = context;
-          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
-          if (!record || !admin) {
-            throw new Error('Missing record or admin context');
-          }
-
-          try {
-            await completeNewspaperPublication({ transactionId: record.params.id as string });
-
-            await logAdminAction({
-              adminId: admin.id,
-              action: 'COMPLETE_NEWSPAPER_PUBLICATION',
-              targetType: 'Transaction',
-              targetId: record.params.id as string,
-              metadata: { reference: record.params.reference }
-            });
-
-            return {
-              record: record.toJSON(currentAdmin),
-              notice: { message: 'Marked as completed.', type: 'success' }
-            };
-          } catch (error) {
-            return {
-              record: record.toJSON(currentAdmin),
-              notice: {
-                message: error instanceof Error ? error.message : 'Could not mark this as completed',
-                type: 'error'
-              }
-            };
-          }
-        }
-      },
-      downloadNewspaperPublicationPdf: {
-        actionType: 'record',
-        icon: 'Download',
-        component: Components.RedirectToManage,
-        isAccessible: ({ currentAdmin, record }) => {
-          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
-          return admin?.role === 'SUPER_ADMIN' && record?.params?.type === 'NEWSPAPER_PUBLICATION';
-        },
-        handler: async (request, response, context) => {
-          const { record, currentAdmin } = context;
-          if (!record) {
-            throw new Error('Missing record');
-          }
+        handler: async (_request, _response, context) => {
+          const { record, currentAdmin } = context; if (!record) throw new Error('Missing record');
           return { record: record.toJSON(currentAdmin) };
         }
       },

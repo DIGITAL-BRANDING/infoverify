@@ -1,0 +1,864 @@
+From 3bdc2ce6d4ba6e38f710967ed5d683525dee5d6a Mon Sep 17 00:00:00 2001
+From: Claude <dev@infoverify.local>
+Date: Sat, 5 Sep 2026 17:23:11 +0000
+Subject: [PATCH] Give Birth Attestation and Newspaper Publication a full admin
+ review page
+
+Upgrades both from the simple complete+download-PDF action pair to the
+same rich 'manage' page pattern already established by cac.ts - a
+dedicated page (not a single AdminJS confirm-guard action) where an
+admin can see every submitted detail, leave a progress note visible to
+the customer while still PENDING, and separately attach the real final
+document to complete the request.
+
+- birth-attestation.service.ts: new updateBirthAttestationProgressNotes()
+  (identical shape to cac.service.ts's updateCacProgressNotes());
+  completeBirthAttestation() now takes attestationPdfBase64 and merges
+  it into the sealed PII via mergeSealedPII() instead of just flipping
+  status with no attached document.
+- newspaper-publication.service.ts: same two changes -
+  updateNewspaperPublicationProgressNotes() +
+  completeNewspaperPublication() now takes publicationPdfBase64 (the
+  scanned cutting/affidavit).
+- admin/birth-attestation.ts: rewritten from a bare PDF-stream route
+  into a full manage page (mirrors admin/cac.ts) - shows the applicant's
+  uploaded ID photo inline, every field in a detail table, a downloadable
+  auto-generated submission form, the progress-notes textarea, and a
+  file input to upload the final NPC attestation document to complete.
+- admin/newspaper-publication.ts: same shape, with Old Details / New
+  Details tables instead of one flat list.
+- transaction.resource.ts: replaced the completeX/downloadXPdf action
+  pairs for both types with single manageBirthAttestation/
+  manageNewspaperPublication actions (mirrors manageCacRequest exactly);
+  redirect-to-manage.tsx's TARGET_PATH_BY_TYPE updated from /pdf to
+  /manage for both.
+
+Verified: all 173 existing backend tests still pass unchanged (vitest
+run). Backend tsc shows only the same pre-existing stale-Prisma-client
+error class already present on bvn-modification.service.ts/cac.service
+.ts (16 of the same errors there, 203 total repo-wide) - this sandbox
+still can't reach binaries.prisma.sh to refresh the cached client;
+running prisma generate locally clears these as always. Frontend
+untouched by this change; tsc/install still clean.
+---
+ maria_backend/src/admin/birth-attestation.ts  | 222 ++++++++++++++++--
+ .../admin/components/redirect-to-manage.tsx   |   4 +-
+ .../src/admin/newspaper-publication.ts        | 222 ++++++++++++++++--
+ .../admin/resources/transaction.resource.ts   | 126 ++--------
+ .../src/services/birth-attestation.service.ts |  45 +++-
+ .../services/newspaper-publication.service.ts |  41 +++-
+ 6 files changed, 486 insertions(+), 174 deletions(-)
+
+diff --git a/maria_backend/src/admin/birth-attestation.ts b/maria_backend/src/admin/birth-attestation.ts
+index 88bd978..7906f97 100644
+--- a/maria_backend/src/admin/birth-attestation.ts
++++ b/maria_backend/src/admin/birth-attestation.ts
+@@ -1,7 +1,7 @@
+ import type { Request, Router } from 'express';
+ import { TransactionType } from '@prisma/client';
+ import { prisma } from '../lib/prisma.js';
+-import { decryptBirthAttestationPII } from '../services/birth-attestation.service.js';
++import { BIRTH_ATTESTATION_FIELDS, completeBirthAttestation, decryptBirthAttestationPII, updateBirthAttestationProgressNotes } from '../services/birth-attestation.service.js';
+ import { logAdminAction } from './audit.js';
+ import type { AdminSessionUser } from './auth.js';
+ 
+@@ -11,42 +11,212 @@ declare module 'express-session' {
+   }
+ }
+ 
++function escapeHtml(value: string) {
++  return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
++}
++
+ /**
+- * Same SUPER_ADMIN-only, audit-logged PDF stream as
+- * registerBvnModificationRoutes() in bvn-modification.ts - see that file's
+- * comment. Reached via the "Download PDF" admin action's redirectUrl on the
+- * Transaction resource.
++ * Custom admin page (not an AdminJS record action) for handling a Birth
++ * Attestation request while it's PENDING - same shape as cac.ts's
++ * registerCacRoutes(): reached via the "manageBirthAttestation" action's
++ * redirectUrl on the Transaction resource. An admin needs to see every
++ * field the customer submitted (including the uploaded ID photo), leave a
++ * free-text progress note while still PENDING, and - separately - attach
++ * the real NPC-issued attestation document (which marks it SUCCESS). Both
++ * are handled by the one page below; the client-side script reads the
++ * chosen file with FileReader and posts it as base64 in a normal JSON
++ * body, so this needs no file-upload middleware (multer etc) at all.
+  */
+ export function registerBirthAttestationRoutes(router: Router) {
+-  router.get('/birth-attestation/:transactionId/pdf', async (req: Request, res) => {
++  router.get('/birth-attestation/:transactionId/manage', async (req: Request, res) => {
+     const admin = req.session?.adminUser;
+     if (!admin) return res.redirect('/admin/login');
+-    if (admin.role !== 'SUPER_ADMIN') {
+-      return res.status(403).type('html').send('<p>Only a Super Admin can open Birth Attestation submission PDFs.</p>');
++    if (admin.role === 'SUPPORT') return res.status(403).type('html').send('<p>Support admins cannot manage Birth Attestation requests.</p>');
++
++    const id = Array.isArray(req.params.transactionId) ? req.params.transactionId[0] : req.params.transactionId;
++    const tx = await prisma.transaction.findUnique({ where: { id } });
++    if (!tx || tx.type !== TransactionType.BIRTH_ATTESTATION) {
++      return res.status(404).type('html').send('<p>Birth Attestation request not found.</p>');
+     }
+ 
+-    const transactionId = Array.isArray(req.params.transactionId) ? req.params.transactionId[0] : req.params.transactionId;
+-    const transaction = await prisma.transaction.findUnique({ where: { id: transactionId } });
+-    if (!transaction || transaction.type !== TransactionType.BIRTH_ATTESTATION) {
+-      return res.status(404).type('html').send('<p>Birth Attestation transaction not found.</p>');
++    await logAdminAction({ adminId: admin.id, action: 'VIEW_TRANSACTION_PII', targetType: 'Transaction', targetId: tx.id, metadata: { reference: tx.reference, via: 'birth_attestation_manage' } });
++
++    const metadata = tx.metadata as Record<string, unknown> | null;
++    const pii = decryptBirthAttestationPII(tx);
++    const progressNotes = typeof metadata?.progress_notes === 'string' ? metadata.progress_notes : '';
++    const isPending = tx.status === 'PENDING';
++    const hasSubmissionForm = typeof pii?.pdf_base64 === 'string' && pii.pdf_base64.length > 0;
++    const hasFinalDoc = typeof pii?.attestation_pdf_base64 === 'string' && pii.attestation_pdf_base64.length > 0;
++    const photo = typeof pii?.clean_picture === 'string' && pii.clean_picture.startsWith('data:image/') ? pii.clean_picture : null;
++
++    const detailRows = BIRTH_ATTESTATION_FIELDS.filter((f) => f.input !== 'image').map(
++      (f): [string, string | undefined] => [f.label, typeof pii?.[f.key] === 'string' ? (pii![f.key] as string) : undefined]
++    );
++
++    res.type('html').send(`<!doctype html>
++<html><head><meta charset="utf-8"><title>Manage Birth Attestation ${escapeHtml(tx.reference)}</title>
++<style>
++  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; }
++  h1 { font-size: 20px; } h2 { font-size: 15px; margin-top: 32px; }
++  .field { margin-top: 8px; }
++  textarea, input[type=file] { width: 100%; box-sizing: border-box; padding: 8px; font: inherit; }
++  textarea { min-height: 90px; }
++  button, .btn { margin-top: 12px; padding: 10px 18px; font: inherit; cursor: pointer; border: 0; border-radius: 6px; background: #6b4f0b; color: #fff; display: inline-block; text-decoration: none; }
++  .btn.primary { background: #0b2f73; }
++  button:disabled { opacity: .5; cursor: not-allowed; }
++  .meta { color: #666; font-size: 13px; }
++  .status { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
++  .status.PENDING { background: #fff3cd; color: #7a5b00; }
++  .status.SUCCESS { background: #d4edda; color: #155724; }
++  #msg { margin-top: 12px; font-size: 14px; }
++  table.details { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
++  table.details td { padding: 6px 4px; border-bottom: 1px solid #eee; vertical-align: top; }
++  table.details td:first-child { color: #666; width: 42%; }
++  .photo { max-width: 220px; border-radius: 8px; margin-top: 10px; display: block; }
++</style></head>
++<body>
++  <p><a href="/admin/resources/Transaction/records/${tx.id}/show">&larr; Back to transaction</a></p>
++  <h1>Birth Attestation — ${escapeHtml(tx.reference)}</h1>
++  <p class="meta">Status: <span class="status ${tx.status}">${tx.status}</span> · NPC Birth Attestation &amp; Instant approval</p>
++
++  ${photo ? `<img class="photo" src="${photo}" alt="Applicant's National ID photo" />` : '<p class="meta"><i>No photo was attached to this request.</i></p>'}
++
++  <h2>File this with NPC</h2>
++  <p class="meta">Every detail the customer submitted, laid out as a printable form - download this before processing the attestation with NPC.</p>
++  ${
++    hasSubmissionForm
++      ? `<a href="#" class="btn primary" onclick="downloadForm(event)">Download submission form (PDF)</a>`
++      : `<p class="meta"><i>No submission form was generated for this request.</i></p>`
++  }
++  <table class="details">
++    ${detailRows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(value ?? '—')}</td></tr>`).join('')}
++  </table>
++
++  ${hasFinalDoc ? `<p class="meta" style="margin-top:16px">A completed attestation document is already attached. <a href="#" onclick="downloadFinal(event)">Download it</a>.</p>` : ''}
++
++  <h2>Progress note</h2>
++  <p class="meta">Visible to the customer on their Birth Attestation history. Save this any time while the request is pending.</p>
++  <div class="field"><textarea id="notes" placeholder="e.g. Submitted to NPC office, awaiting approval">${escapeHtml(progressNotes)}</textarea></div>
++  <button id="saveNotes" ${isPending ? '' : 'disabled'}>Save progress note</button>
++
++  <h2>Complete request</h2>
++  <p class="meta">Upload the final NPC attestation document once it's issued. This marks the request SUCCESS and lets the customer download it immediately.</p>
++  <div class="field"><input type="file" id="finalFile" accept="application/pdf" ${isPending ? '' : 'disabled'} /></div>
++  <button id="complete" ${isPending ? '' : 'disabled'}>Mark complete &amp; attach document</button>
++
++  <p id="msg"></p>
++
++<script>
++  const txId = ${JSON.stringify(tx.id)};
++  const finalBase64 = ${JSON.stringify(hasFinalDoc ? pii!.attestation_pdf_base64 : null)};
++  const formBase64 = ${JSON.stringify(hasSubmissionForm ? pii!.pdf_base64 : null)};
++  const msg = document.getElementById('msg');
++
++  function downloadFinal(e) {
++    e.preventDefault();
++    if (!finalBase64) return;
++    const a = document.createElement('a');
++    a.href = 'data:application/pdf;base64,' + finalBase64;
++    a.download = ${JSON.stringify(tx.reference)} + '-attestation.pdf';
++    a.click();
++  }
++
++  function downloadForm(e) {
++    e.preventDefault();
++    if (!formBase64) return;
++    const a = document.createElement('a');
++    a.href = 'data:application/pdf;base64,' + formBase64;
++    a.download = ${JSON.stringify(tx.reference)} + '-submission-form.pdf';
++    a.click();
++  }
++
++  document.getElementById('saveNotes').addEventListener('click', async () => {
++    msg.textContent = 'Saving…';
++    const res = await fetch('/admin/birth-attestation/' + txId + '/manage', {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ action: 'notes', progress_notes: document.getElementById('notes').value })
++    });
++    const data = await res.json().catch(() => ({}));
++    msg.textContent = res.ok ? 'Saved.' : (data.error || data.message || 'Failed to save.');
++  });
++
++  document.getElementById('complete').addEventListener('click', async () => {
++    const input = document.getElementById('finalFile');
++    const file = input.files && input.files[0];
++    if (!file) { msg.textContent = 'Choose a PDF file first.'; return; }
++    if (file.type !== 'application/pdf') { msg.textContent = 'Please choose a PDF file.'; return; }
++    // Base64 adds ~33% on top of the raw file size, and the server accepts
++    // request bodies up to 20mb (see app.ts) - 14mb raw is the largest file
++    // that stays comfortably under that after the base64 conversion below.
++    const MAX_RAW_BYTES = 14 * 1024 * 1024;
++    if (file.size > MAX_RAW_BYTES) {
++      msg.textContent = 'That PDF is too large (' + (file.size / (1024 * 1024)).toFixed(1) + 'MB). Please compress it to under 14MB and try again.';
++      return;
+     }
++    msg.textContent = 'Uploading…';
++    const reader = new FileReader();
++    reader.onload = async () => {
++      const base64 = reader.result.split(',')[1];
++      const res = await fetch('/admin/birth-attestation/' + txId + '/manage', {
++        method: 'POST',
++        headers: { 'Content-Type': 'application/json' },
++        body: JSON.stringify({ action: 'complete', attestation_pdf_base64: base64 })
++      });
++      const data = await res.json().catch(() => ({}));
++      if (res.ok) {
++        msg.textContent = 'Marked complete. Reloading…';
++        setTimeout(() => window.location.reload(), 800);
++      } else if (res.status === 413) {
++        msg.textContent = 'That PDF is too large for the server to accept. Please compress it and try again.';
++      } else {
++        msg.textContent = data.error || data.message || ('Failed to complete (HTTP ' + res.status + ').');
++      }
++    };
++    reader.readAsDataURL(file);
++  });
++</script>
++</body></html>`);
++  });
++
++  router.post('/birth-attestation/:transactionId/manage', async (req: Request, res) => {
++    const admin = req.session?.adminUser;
++    if (!admin) return res.status(401).json({ error: 'Not signed in' });
++    if (admin.role === 'SUPPORT') return res.status(403).json({ error: 'Support admins cannot manage Birth Attestation requests.' });
+ 
+-    const pii = decryptBirthAttestationPII(transaction);
+-    if (!pii?.pdf_base64 || typeof pii.pdf_base64 !== 'string') {
+-      return res.status(404).type('html').send('<p>No PDF was generated for this request.</p>');
++    const id = Array.isArray(req.params.transactionId) ? req.params.transactionId[0] : req.params.transactionId;
++    const tx = await prisma.transaction.findUnique({ where: { id } });
++    if (!tx || tx.type !== TransactionType.BIRTH_ATTESTATION) {
++      return res.status(404).json({ error: 'Birth Attestation request not found' });
+     }
+ 
+-    await logAdminAction({
+-      adminId: admin.id,
+-      action: 'VIEW_TRANSACTION_PII',
+-      targetType: 'Transaction',
+-      targetId: transaction.id,
+-      metadata: { reference: transaction.reference, via: 'birth_attestation_pdf' }
+-    });
++    // AdminJS's express-formidable parser exposes normal form/JSON payloads
++    // through `fields` and may leave `req.body` undefined.
++    const body = (req.body ?? (req as Request & { fields?: unknown }).fields ?? {}) as {
++      action?: string;
++      progress_notes?: string;
++      attestation_pdf_base64?: string;
++    };
+ 
+-    const buffer = Buffer.from(pii.pdf_base64, 'base64');
+-    res.setHeader('Content-Type', 'application/pdf');
+-    res.setHeader('Content-Disposition', `inline; filename="${transaction.reference}.pdf"`);
+-    res.send(buffer);
++    try {
++      if (body.action === 'notes') {
++        await updateBirthAttestationProgressNotes({ transactionId: tx.id, notes: String(body.progress_notes ?? '').slice(0, 2000) });
++        await logAdminAction({ adminId: admin.id, action: 'UPDATE_BIRTH_ATTESTATION_PROGRESS', targetType: 'Transaction', targetId: tx.id, metadata: { reference: tx.reference } });
++        return res.json({ ok: true });
++      }
++
++      if (body.action === 'complete') {
++        if (!body.attestation_pdf_base64 || typeof body.attestation_pdf_base64 !== 'string') {
++          return res.status(400).json({ error: 'The final attestation PDF is required.' });
++        }
++        await completeBirthAttestation({ transactionId: tx.id, attestationPdfBase64: body.attestation_pdf_base64 });
++        await logAdminAction({ adminId: admin.id, action: 'COMPLETE_BIRTH_ATTESTATION', targetType: 'Transaction', targetId: tx.id, metadata: { reference: tx.reference } });
++        return res.json({ ok: true });
++      }
++
++      return res.status(400).json({ error: 'Unknown action' });
++    } catch (error) {
++      return res.status(422).json({ error: error instanceof Error ? error.message : 'Request failed' });
++    }
+   });
+ }
+diff --git a/maria_backend/src/admin/components/redirect-to-manage.tsx b/maria_backend/src/admin/components/redirect-to-manage.tsx
+index 335f4d0..c299e24 100644
+--- a/maria_backend/src/admin/components/redirect-to-manage.tsx
++++ b/maria_backend/src/admin/components/redirect-to-manage.tsx
+@@ -32,8 +32,8 @@ const TARGET_PATH_BY_TYPE: Record<string, (id: string) => string> = {
+   NIN_MODIFICATION: (id) => `/admin/nin-modification/${id}/pdf`,
+   BVN_LICENSE_ONBOARDING: (id) => `/admin/bvn-license/${id}/pdf`,
+   BVN_MODIFICATION: (id) => `/admin/bvn-modification/${id}/pdf`,
+-  BIRTH_ATTESTATION: (id) => `/admin/birth-attestation/${id}/pdf`,
+-  NEWSPAPER_PUBLICATION: (id) => `/admin/newspaper-publication/${id}/pdf`,
++  BIRTH_ATTESTATION: (id) => `/admin/birth-attestation/${id}/manage`,
++  NEWSPAPER_PUBLICATION: (id) => `/admin/newspaper-publication/${id}/manage`,
+   BVN_CRM: (id) => `/admin/bvn-crm/${id}/pdf`
+ };
+ 
+diff --git a/maria_backend/src/admin/newspaper-publication.ts b/maria_backend/src/admin/newspaper-publication.ts
+index b501640..9c86709 100644
+--- a/maria_backend/src/admin/newspaper-publication.ts
++++ b/maria_backend/src/admin/newspaper-publication.ts
+@@ -1,7 +1,12 @@
+ import type { Request, Router } from 'express';
+ import { TransactionType } from '@prisma/client';
+ import { prisma } from '../lib/prisma.js';
+-import { decryptNewspaperPublicationPII } from '../services/newspaper-publication.service.js';
++import {
++  NEWSPAPER_PUBLICATION_FIELDS,
++  completeNewspaperPublication,
++  decryptNewspaperPublicationPII,
++  updateNewspaperPublicationProgressNotes
++} from '../services/newspaper-publication.service.js';
+ import { logAdminAction } from './audit.js';
+ import type { AdminSessionUser } from './auth.js';
+ 
+@@ -11,42 +16,207 @@ declare module 'express-session' {
+   }
+ }
+ 
++function escapeHtml(value: string) {
++  return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
++}
++
+ /**
+- * Same SUPER_ADMIN-only, audit-logged PDF stream as
+- * registerBvnModificationRoutes() in bvn-modification.ts - see that file's
+- * comment. Reached via the "Download PDF" admin action's redirectUrl on the
+- * Transaction resource.
++ * Custom admin page (not an AdminJS record action) for handling a
++ * Newspaper Publication request while it's PENDING - same shape as
++ * cac.ts/birth-attestation.ts: reached via the "manageNewspaperPublication"
++ * action's redirectUrl on the Transaction resource. An admin needs to see
++ * the old/new name details, leave a free-text progress note while still
++ * PENDING, and - separately - attach the scanned newspaper cutting/
++ * affidavit once the publication has actually run (which marks it
++ * SUCCESS).
+  */
+ export function registerNewspaperPublicationRoutes(router: Router) {
+-  router.get('/newspaper-publication/:transactionId/pdf', async (req: Request, res) => {
++  router.get('/newspaper-publication/:transactionId/manage', async (req: Request, res) => {
+     const admin = req.session?.adminUser;
+     if (!admin) return res.redirect('/admin/login');
+-    if (admin.role !== 'SUPER_ADMIN') {
+-      return res.status(403).type('html').send('<p>Only a Super Admin can open Newspaper Publication submission PDFs.</p>');
++    if (admin.role === 'SUPPORT') return res.status(403).type('html').send('<p>Support admins cannot manage Newspaper Publication requests.</p>');
++
++    const id = Array.isArray(req.params.transactionId) ? req.params.transactionId[0] : req.params.transactionId;
++    const tx = await prisma.transaction.findUnique({ where: { id } });
++    if (!tx || tx.type !== TransactionType.NEWSPAPER_PUBLICATION) {
++      return res.status(404).type('html').send('<p>Newspaper Publication request not found.</p>');
+     }
+ 
+-    const transactionId = Array.isArray(req.params.transactionId) ? req.params.transactionId[0] : req.params.transactionId;
+-    const transaction = await prisma.transaction.findUnique({ where: { id: transactionId } });
+-    if (!transaction || transaction.type !== TransactionType.NEWSPAPER_PUBLICATION) {
+-      return res.status(404).type('html').send('<p>Newspaper Publication transaction not found.</p>');
++    await logAdminAction({ adminId: admin.id, action: 'VIEW_TRANSACTION_PII', targetType: 'Transaction', targetId: tx.id, metadata: { reference: tx.reference, via: 'newspaper_publication_manage' } });
++
++    const metadata = tx.metadata as Record<string, unknown> | null;
++    const pii = decryptNewspaperPublicationPII(tx);
++    const progressNotes = typeof metadata?.progress_notes === 'string' ? metadata.progress_notes : '';
++    const isPending = tx.status === 'PENDING';
++    const hasSubmissionForm = typeof pii?.pdf_base64 === 'string' && pii.pdf_base64.length > 0;
++    const hasFinalDoc = typeof pii?.publication_pdf_base64 === 'string' && pii.publication_pdf_base64.length > 0;
++
++    const oldRows = NEWSPAPER_PUBLICATION_FIELDS.filter((f) => f.key.startsWith('old_')).map(
++      (f): [string, string | undefined] => [f.label, typeof pii?.[f.key] === 'string' ? (pii![f.key] as string) : undefined]
++    );
++    const newRows = NEWSPAPER_PUBLICATION_FIELDS.filter((f) => f.key.startsWith('new_')).map(
++      (f): [string, string | undefined] => [f.label, typeof pii?.[f.key] === 'string' ? (pii![f.key] as string) : undefined]
++    );
++
++    res.type('html').send(`<!doctype html>
++<html><head><meta charset="utf-8"><title>Manage Newspaper Publication ${escapeHtml(tx.reference)}</title>
++<style>
++  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; }
++  h1 { font-size: 20px; } h2 { font-size: 15px; margin-top: 32px; }
++  .field { margin-top: 8px; }
++  textarea, input[type=file] { width: 100%; box-sizing: border-box; padding: 8px; font: inherit; }
++  textarea { min-height: 90px; }
++  button, .btn { margin-top: 12px; padding: 10px 18px; font: inherit; cursor: pointer; border: 0; border-radius: 6px; background: #6b4f0b; color: #fff; display: inline-block; text-decoration: none; }
++  .btn.primary { background: #0b2f73; }
++  button:disabled { opacity: .5; cursor: not-allowed; }
++  .meta { color: #666; font-size: 13px; }
++  .status { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
++  .status.PENDING { background: #fff3cd; color: #7a5b00; }
++  .status.SUCCESS { background: #d4edda; color: #155724; }
++  #msg { margin-top: 12px; font-size: 14px; }
++  table.details { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
++  table.details td { padding: 6px 4px; border-bottom: 1px solid #eee; vertical-align: top; }
++  table.details td:first-child { color: #666; width: 42%; }
++</style></head>
++<body>
++  <p><a href="/admin/resources/Transaction/records/${tx.id}/show">&larr; Back to transaction</a></p>
++  <h1>Newspaper Publication — ${escapeHtml(tx.reference)}</h1>
++  <p class="meta">Status: <span class="status ${tx.status}">${tx.status}</span> · Name only or Name &amp; DoB (BluePrint/DailyTrust)</p>
++
++  <h2>File this with the newspaper</h2>
++  <p class="meta">Every detail the customer submitted, laid out as a printable form - download this before placing the publication.</p>
++  ${
++    hasSubmissionForm
++      ? `<a href="#" class="btn primary" onclick="downloadForm(event)">Download submission form (PDF)</a>`
++      : `<p class="meta"><i>No submission form was generated for this request.</i></p>`
++  }
++
++  <h2 style="margin-top:20px">Old Details</h2>
++  <table class="details">${oldRows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(value ?? '—')}</td></tr>`).join('')}</table>
++
++  <h2>New Details</h2>
++  <table class="details">${newRows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(value ?? '—')}</td></tr>`).join('')}</table>
++
++  ${hasFinalDoc ? `<p class="meta" style="margin-top:16px">A completed publication cutting is already attached. <a href="#" onclick="downloadFinal(event)">Download it</a>.</p>` : ''}
++
++  <h2>Progress note</h2>
++  <p class="meta">Visible to the customer on their Newspaper Publication history. Save this any time while the request is pending.</p>
++  <div class="field"><textarea id="notes" placeholder="e.g. Submitted to BluePrint, awaiting publication date">${escapeHtml(progressNotes)}</textarea></div>
++  <button id="saveNotes" ${isPending ? '' : 'disabled'}>Save progress note</button>
++
++  <h2>Complete request</h2>
++  <p class="meta">Upload the scanned newspaper cutting/affidavit once the publication has run. This marks the request SUCCESS and lets the customer download it immediately.</p>
++  <div class="field"><input type="file" id="finalFile" accept="application/pdf" ${isPending ? '' : 'disabled'} /></div>
++  <button id="complete" ${isPending ? '' : 'disabled'}>Mark complete &amp; attach cutting</button>
++
++  <p id="msg"></p>
++
++<script>
++  const txId = ${JSON.stringify(tx.id)};
++  const finalBase64 = ${JSON.stringify(hasFinalDoc ? pii!.publication_pdf_base64 : null)};
++  const formBase64 = ${JSON.stringify(hasSubmissionForm ? pii!.pdf_base64 : null)};
++  const msg = document.getElementById('msg');
++
++  function downloadFinal(e) {
++    e.preventDefault();
++    if (!finalBase64) return;
++    const a = document.createElement('a');
++    a.href = 'data:application/pdf;base64,' + finalBase64;
++    a.download = ${JSON.stringify(tx.reference)} + '-cutting.pdf';
++    a.click();
++  }
++
++  function downloadForm(e) {
++    e.preventDefault();
++    if (!formBase64) return;
++    const a = document.createElement('a');
++    a.href = 'data:application/pdf;base64,' + formBase64;
++    a.download = ${JSON.stringify(tx.reference)} + '-submission-form.pdf';
++    a.click();
++  }
++
++  document.getElementById('saveNotes').addEventListener('click', async () => {
++    msg.textContent = 'Saving…';
++    const res = await fetch('/admin/newspaper-publication/' + txId + '/manage', {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ action: 'notes', progress_notes: document.getElementById('notes').value })
++    });
++    const data = await res.json().catch(() => ({}));
++    msg.textContent = res.ok ? 'Saved.' : (data.error || data.message || 'Failed to save.');
++  });
++
++  document.getElementById('complete').addEventListener('click', async () => {
++    const input = document.getElementById('finalFile');
++    const file = input.files && input.files[0];
++    if (!file) { msg.textContent = 'Choose a PDF file first.'; return; }
++    if (file.type !== 'application/pdf') { msg.textContent = 'Please choose a PDF file.'; return; }
++    const MAX_RAW_BYTES = 14 * 1024 * 1024;
++    if (file.size > MAX_RAW_BYTES) {
++      msg.textContent = 'That PDF is too large (' + (file.size / (1024 * 1024)).toFixed(1) + 'MB). Please compress it to under 14MB and try again.';
++      return;
+     }
++    msg.textContent = 'Uploading…';
++    const reader = new FileReader();
++    reader.onload = async () => {
++      const base64 = reader.result.split(',')[1];
++      const res = await fetch('/admin/newspaper-publication/' + txId + '/manage', {
++        method: 'POST',
++        headers: { 'Content-Type': 'application/json' },
++        body: JSON.stringify({ action: 'complete', publication_pdf_base64: base64 })
++      });
++      const data = await res.json().catch(() => ({}));
++      if (res.ok) {
++        msg.textContent = 'Marked complete. Reloading…';
++        setTimeout(() => window.location.reload(), 800);
++      } else if (res.status === 413) {
++        msg.textContent = 'That PDF is too large for the server to accept. Please compress it and try again.';
++      } else {
++        msg.textContent = data.error || data.message || ('Failed to complete (HTTP ' + res.status + ').');
++      }
++    };
++    reader.readAsDataURL(file);
++  });
++</script>
++</body></html>`);
++  });
++
++  router.post('/newspaper-publication/:transactionId/manage', async (req: Request, res) => {
++    const admin = req.session?.adminUser;
++    if (!admin) return res.status(401).json({ error: 'Not signed in' });
++    if (admin.role === 'SUPPORT') return res.status(403).json({ error: 'Support admins cannot manage Newspaper Publication requests.' });
+ 
+-    const pii = decryptNewspaperPublicationPII(transaction);
+-    if (!pii?.pdf_base64 || typeof pii.pdf_base64 !== 'string') {
+-      return res.status(404).type('html').send('<p>No PDF was generated for this request.</p>');
++    const id = Array.isArray(req.params.transactionId) ? req.params.transactionId[0] : req.params.transactionId;
++    const tx = await prisma.transaction.findUnique({ where: { id } });
++    if (!tx || tx.type !== TransactionType.NEWSPAPER_PUBLICATION) {
++      return res.status(404).json({ error: 'Newspaper Publication request not found' });
+     }
+ 
+-    await logAdminAction({
+-      adminId: admin.id,
+-      action: 'VIEW_TRANSACTION_PII',
+-      targetType: 'Transaction',
+-      targetId: transaction.id,
+-      metadata: { reference: transaction.reference, via: 'newspaper_publication_pdf' }
+-    });
++    const body = (req.body ?? (req as Request & { fields?: unknown }).fields ?? {}) as {
++      action?: string;
++      progress_notes?: string;
++      publication_pdf_base64?: string;
++    };
+ 
+-    const buffer = Buffer.from(pii.pdf_base64, 'base64');
+-    res.setHeader('Content-Type', 'application/pdf');
+-    res.setHeader('Content-Disposition', `inline; filename="${transaction.reference}.pdf"`);
+-    res.send(buffer);
++    try {
++      if (body.action === 'notes') {
++        await updateNewspaperPublicationProgressNotes({ transactionId: tx.id, notes: String(body.progress_notes ?? '').slice(0, 2000) });
++        await logAdminAction({ adminId: admin.id, action: 'UPDATE_NEWSPAPER_PUBLICATION_PROGRESS', targetType: 'Transaction', targetId: tx.id, metadata: { reference: tx.reference } });
++        return res.json({ ok: true });
++      }
++
++      if (body.action === 'complete') {
++        if (!body.publication_pdf_base64 || typeof body.publication_pdf_base64 !== 'string') {
++          return res.status(400).json({ error: 'The published cutting PDF is required.' });
++        }
++        await completeNewspaperPublication({ transactionId: tx.id, publicationPdfBase64: body.publication_pdf_base64 });
++        await logAdminAction({ adminId: admin.id, action: 'COMPLETE_NEWSPAPER_PUBLICATION', targetType: 'Transaction', targetId: tx.id, metadata: { reference: tx.reference } });
++        return res.json({ ok: true });
++      }
++
++      return res.status(400).json({ error: 'Unknown action' });
++    } catch (error) {
++      return res.status(422).json({ error: error instanceof Error ? error.message : 'Request failed' });
++    }
+   });
+ }
+diff --git a/maria_backend/src/admin/resources/transaction.resource.ts b/maria_backend/src/admin/resources/transaction.resource.ts
+index c38cb32..4136ee8 100644
+--- a/maria_backend/src/admin/resources/transaction.resource.ts
++++ b/maria_backend/src/admin/resources/transaction.resource.ts
+@@ -4,8 +4,6 @@ import { prisma } from '../../lib/prisma.js';
+ import { decryptTransactionPII } from '../../services/verification.service.js';
+ import { completeModification } from '../../services/nin-modification.service.js';
+ import { completeBvnModification } from '../../services/bvn-modification.service.js';
+-import { completeBirthAttestation } from '../../services/birth-attestation.service.js';
+-import { completeNewspaperPublication } from '../../services/newspaper-publication.service.js';
+ import { completeBvnCrm } from '../../services/bvn-crm.service.js';
+ import { TransactionStatus } from '@prisma/client';
+ import { refundWallet } from '../../services/wallet.service.js';
+@@ -293,123 +291,31 @@ export const transactionResource: ResourceWithOptions = {
+           return { record: record.toJSON(currentAdmin) };
+         }
+       },
+-      // Same two actions as completeBvnModification/downloadBvnModificationPdf
+-      // above, for BIRTH_ATTESTATION rows - see birth-attestation.service.ts.
+-      completeBirthAttestation: {
+-        actionType: 'record',
+-        icon: 'CheckCircle',
+-        guard: 'Mark this Birth Attestation request as completed? Only do this after NPC has actually processed it.',
+-        isAccessible: ({ currentAdmin, record }) => {
+-          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
+-          if (!admin || admin.role === 'SUPPORT') return false;
+-          return record?.params?.type === 'BIRTH_ATTESTATION' && record?.params?.status === 'PENDING';
+-        },
+-        handler: async (request, response, context) => {
+-          const { record, currentAdmin } = context;
+-          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
+-          if (!record || !admin) {
+-            throw new Error('Missing record or admin context');
+-          }
+-
+-          try {
+-            await completeBirthAttestation({ transactionId: record.params.id as string });
+-
+-            await logAdminAction({
+-              adminId: admin.id,
+-              action: 'COMPLETE_BIRTH_ATTESTATION',
+-              targetType: 'Transaction',
+-              targetId: record.params.id as string,
+-              metadata: { reference: record.params.reference }
+-            });
+-
+-            return {
+-              record: record.toJSON(currentAdmin),
+-              notice: { message: 'Marked as completed.', type: 'success' }
+-            };
+-          } catch (error) {
+-            return {
+-              record: record.toJSON(currentAdmin),
+-              notice: {
+-                message: error instanceof Error ? error.message : 'Could not mark this as completed',
+-                type: 'error'
+-              }
+-            };
+-          }
+-        }
+-      },
+-      downloadBirthAttestationPdf: {
+-        actionType: 'record',
+-        icon: 'Download',
+-        component: Components.RedirectToManage,
++      // Like manageCacRequest below: a real form (details + a progress
++      // note + a final-document upload), not a single confirm-guard click,
++      // so this redirects to a dedicated manage page instead of an inline
++      // handler. See birth-attestation.service.ts / admin/birth-attestation.ts.
++      manageBirthAttestation: {
++        actionType: 'record', icon: 'Edit', component: Components.RedirectToManage,
+         isAccessible: ({ currentAdmin, record }) => {
+           const admin = currentAdmin as unknown as AdminSessionUser | undefined;
+-          return admin?.role === 'SUPER_ADMIN' && record?.params?.type === 'BIRTH_ATTESTATION';
++          return !!admin && admin.role !== 'SUPPORT' && record?.params?.type === 'BIRTH_ATTESTATION';
+         },
+-        handler: async (request, response, context) => {
+-          const { record, currentAdmin } = context;
+-          if (!record) {
+-            throw new Error('Missing record');
+-          }
++        handler: async (_request, _response, context) => {
++          const { record, currentAdmin } = context; if (!record) throw new Error('Missing record');
+           return { record: record.toJSON(currentAdmin) };
+         }
+       },
+-      // Same pair again, for NEWSPAPER_PUBLICATION rows - see
+-      // newspaper-publication.service.ts.
+-      completeNewspaperPublication: {
+-        actionType: 'record',
+-        icon: 'CheckCircle',
+-        guard: 'Mark this Newspaper Publication request as completed? Only do this after the publication has actually been placed.',
+-        isAccessible: ({ currentAdmin, record }) => {
+-          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
+-          if (!admin || admin.role === 'SUPPORT') return false;
+-          return record?.params?.type === 'NEWSPAPER_PUBLICATION' && record?.params?.status === 'PENDING';
+-        },
+-        handler: async (request, response, context) => {
+-          const { record, currentAdmin } = context;
+-          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
+-          if (!record || !admin) {
+-            throw new Error('Missing record or admin context');
+-          }
+-
+-          try {
+-            await completeNewspaperPublication({ transactionId: record.params.id as string });
+-
+-            await logAdminAction({
+-              adminId: admin.id,
+-              action: 'COMPLETE_NEWSPAPER_PUBLICATION',
+-              targetType: 'Transaction',
+-              targetId: record.params.id as string,
+-              metadata: { reference: record.params.reference }
+-            });
+-
+-            return {
+-              record: record.toJSON(currentAdmin),
+-              notice: { message: 'Marked as completed.', type: 'success' }
+-            };
+-          } catch (error) {
+-            return {
+-              record: record.toJSON(currentAdmin),
+-              notice: {
+-                message: error instanceof Error ? error.message : 'Could not mark this as completed',
+-                type: 'error'
+-              }
+-            };
+-          }
+-        }
+-      },
+-      downloadNewspaperPublicationPdf: {
+-        actionType: 'record',
+-        icon: 'Download',
+-        component: Components.RedirectToManage,
++      // Same shape again, for NEWSPAPER_PUBLICATION rows - see
++      // newspaper-publication.service.ts / admin/newspaper-publication.ts.
++      manageNewspaperPublication: {
++        actionType: 'record', icon: 'Edit', component: Components.RedirectToManage,
+         isAccessible: ({ currentAdmin, record }) => {
+           const admin = currentAdmin as unknown as AdminSessionUser | undefined;
+-          return admin?.role === 'SUPER_ADMIN' && record?.params?.type === 'NEWSPAPER_PUBLICATION';
++          return !!admin && admin.role !== 'SUPPORT' && record?.params?.type === 'NEWSPAPER_PUBLICATION';
+         },
+-        handler: async (request, response, context) => {
+-          const { record, currentAdmin } = context;
+-          if (!record) {
+-            throw new Error('Missing record');
+-          }
++        handler: async (_request, _response, context) => {
++          const { record, currentAdmin } = context; if (!record) throw new Error('Missing record');
+           return { record: record.toJSON(currentAdmin) };
+         }
+       },
+diff --git a/maria_backend/src/services/birth-attestation.service.ts b/maria_backend/src/services/birth-attestation.service.ts
+index cbc8376..9fa1400 100644
+--- a/maria_backend/src/services/birth-attestation.service.ts
++++ b/maria_backend/src/services/birth-attestation.service.ts
+@@ -1,7 +1,7 @@
+ import PDFDocument from 'pdfkit';
+ import { Prisma, TransactionStatus, TransactionType } from '@prisma/client';
+ import { koboToNaira } from '../lib/money.js';
+-import { sealPII, openPII } from '../lib/pii.js';
++import { sealPII, openPII, mergeSealedPII } from '../lib/pii.js';
+ import { prisma } from '../lib/prisma.js';
+ import { ApiError } from '../middleware/error.js';
+ import { debitWallet } from './wallet.service.js';
+@@ -266,7 +266,28 @@ export async function listBirthAttestationHistory(params: { userId: string }) {
+  *  actually processed it. No wallet movement - the customer was already
+  *  charged at submit time. Rejection uses the existing generic
+  *  refundWallet()/"reverse" admin action. */
+-export async function completeBirthAttestation(params: { transactionId: string }) {
++/** Admin-only: leaves a free-text progress note visible to the customer on
++ *  their Birth Attestation history, without changing the transaction's
++ *  status. Same shape as cac.service.ts's updateCacProgressNotes(). */
++export async function updateBirthAttestationProgressNotes(params: { transactionId: string; notes: string }) {
++  const transaction = await prisma.transaction.findUnique({ where: { id: params.transactionId } });
++  if (!transaction || transaction.type !== TransactionType.BIRTH_ATTESTATION) {
++    throw new ApiError(404, 'Birth Attestation transaction not found', 'TRANSACTION_NOT_FOUND');
++  }
++  const metadata = (transaction.metadata as Record<string, unknown> | null) ?? {};
++  await prisma.transaction.update({
++    where: { id: transaction.id },
++    data: { metadata: { ...metadata, progress_notes: params.notes } as Prisma.InputJsonValue }
++  });
++}
++
++/** Called from the manage page once NPC has actually issued the attestation
++ *  - attaches that final document (same mergeSealedPII approach as
++ *  cac.service.ts's completeCacRequest()) and marks the request SUCCESS. No
++ *  wallet movement - the customer was already charged at submit time.
++ *  Rejection still uses the existing generic refundWallet()/"reverse"
++ *  admin action. */
++export async function completeBirthAttestation(params: { transactionId: string; attestationPdfBase64: string }) {
+   const transaction = await prisma.transaction.findUnique({ where: { id: params.transactionId } });
+   if (!transaction || transaction.type !== TransactionType.BIRTH_ATTESTATION) {
+     throw new ApiError(404, 'Birth Attestation transaction not found', 'TRANSACTION_NOT_FOUND');
+@@ -274,12 +295,24 @@ export async function completeBirthAttestation(params: { transactionId: string }
+   if (transaction.status !== TransactionStatus.PENDING) {
+     throw new ApiError(422, 'Only a pending request can be marked complete', 'INVALID_STATUS');
+   }
+-  return prisma.transaction.update({ where: { id: transaction.id }, data: { status: TransactionStatus.SUCCESS } });
++
++  const metadata = (transaction.metadata as Record<string, unknown> | null) ?? {};
++  await prisma.transaction.update({
++    where: { id: transaction.id },
++    data: {
++      status: TransactionStatus.SUCCESS,
++      metadata: {
++        ...metadata,
++        pii: mergeSealedPII(metadata.pii, { attestation_pdf_base64: params.attestationPdfBase64 })
++      } as Prisma.InputJsonValue
++    }
++  });
+ }
+ 
+-/** Decrypts the sealed PII (including the generated PDF) for the admin's
+- *  PDF-download route. Never call this from a user-facing endpoint. */
++/** Decrypts the sealed PII (submitted values, the auto-generated submission
++ *  PDF, and - once completed - the final NPC attestation document) for the
++ *  admin's manage page. Never call this from a user-facing endpoint. */
+ export function decryptBirthAttestationPII(transaction: { metadata: unknown }) {
+   const metadata = transaction.metadata as Record<string, unknown> | null;
+-  return openPII<Record<string, unknown> & { pdf_base64?: string }>(metadata?.pii);
++  return openPII<Record<string, unknown> & { pdf_base64?: string; attestation_pdf_base64?: string }>(metadata?.pii);
+ }
+diff --git a/maria_backend/src/services/newspaper-publication.service.ts b/maria_backend/src/services/newspaper-publication.service.ts
+index 225d7f6..bd124ec 100644
+--- a/maria_backend/src/services/newspaper-publication.service.ts
++++ b/maria_backend/src/services/newspaper-publication.service.ts
+@@ -1,7 +1,7 @@
+ import PDFDocument from 'pdfkit';
+ import { Prisma, TransactionStatus, TransactionType } from '@prisma/client';
+ import { koboToNaira } from '../lib/money.js';
+-import { sealPII, openPII } from '../lib/pii.js';
++import { sealPII, openPII, mergeSealedPII } from '../lib/pii.js';
+ import { prisma } from '../lib/prisma.js';
+ import { ApiError } from '../middleware/error.js';
+ import { debitWallet } from './wallet.service.js';
+@@ -194,7 +194,26 @@ export async function listNewspaperPublicationHistory(params: { userId: string }
+   });
+ }
+ 
+-export async function completeNewspaperPublication(params: { transactionId: string }) {
++/** Admin-only: leaves a free-text progress note visible to the customer on
++ *  their Newspaper Publication history, without changing the transaction's
++ *  status. Same shape as cac.service.ts's updateCacProgressNotes(). */
++export async function updateNewspaperPublicationProgressNotes(params: { transactionId: string; notes: string }) {
++  const transaction = await prisma.transaction.findUnique({ where: { id: params.transactionId } });
++  if (!transaction || transaction.type !== TransactionType.NEWSPAPER_PUBLICATION) {
++    throw new ApiError(404, 'Newspaper Publication transaction not found', 'TRANSACTION_NOT_FOUND');
++  }
++  const metadata = (transaction.metadata as Record<string, unknown> | null) ?? {};
++  await prisma.transaction.update({
++    where: { id: transaction.id },
++    data: { metadata: { ...metadata, progress_notes: params.notes } as Prisma.InputJsonValue }
++  });
++}
++
++/** Called from the manage page once the newspaper cutting has actually been
++ *  placed - attaches that final proof (scanned cutting/affidavit) and marks
++ *  the request SUCCESS. No wallet movement - the customer was already
++ *  charged at submit time. */
++export async function completeNewspaperPublication(params: { transactionId: string; publicationPdfBase64: string }) {
+   const transaction = await prisma.transaction.findUnique({ where: { id: params.transactionId } });
+   if (!transaction || transaction.type !== TransactionType.NEWSPAPER_PUBLICATION) {
+     throw new ApiError(404, 'Newspaper Publication transaction not found', 'TRANSACTION_NOT_FOUND');
+@@ -202,10 +221,24 @@ export async function completeNewspaperPublication(params: { transactionId: stri
+   if (transaction.status !== TransactionStatus.PENDING) {
+     throw new ApiError(422, 'Only a pending request can be marked complete', 'INVALID_STATUS');
+   }
+-  return prisma.transaction.update({ where: { id: transaction.id }, data: { status: TransactionStatus.SUCCESS } });
++
++  const metadata = (transaction.metadata as Record<string, unknown> | null) ?? {};
++  await prisma.transaction.update({
++    where: { id: transaction.id },
++    data: {
++      status: TransactionStatus.SUCCESS,
++      metadata: {
++        ...metadata,
++        pii: mergeSealedPII(metadata.pii, { publication_pdf_base64: params.publicationPdfBase64 })
++      } as Prisma.InputJsonValue
++    }
++  });
+ }
+ 
++/** Decrypts the sealed PII (submitted values, the auto-generated submission
++ *  PDF, and - once completed - the final published cutting/proof) for the
++ *  admin's manage page. Never call this from a user-facing endpoint. */
+ export function decryptNewspaperPublicationPII(transaction: { metadata: unknown }) {
+   const metadata = transaction.metadata as Record<string, unknown> | null;
+-  return openPII<Record<string, unknown> & { pdf_base64?: string }>(metadata?.pii);
++  return openPII<Record<string, unknown> & { pdf_base64?: string; publication_pdf_base64?: string }>(metadata?.pii);
+ }
+-- 
+2.43.0
+
