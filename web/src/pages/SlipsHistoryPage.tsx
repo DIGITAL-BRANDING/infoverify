@@ -1,96 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Download, FileText, Loader2 } from 'lucide-react';
+import { ChevronRight, Clock3, FileText, Loader2, ReceiptText } from 'lucide-react';
 import AppShell from '../components/AppShell';
 import { api } from '../lib/api';
 
-type SlipEntry = {
-  reference: string;
-  status: string;
-  created_at: string;
-  service: string | null;
-  pdf_base64: string | null;
-  pdf_url: string | null;
-  ticket_id: string | null;
-};
-
-// Turns a raw service key like "NIN_PHONE_SLIP_PREMIUM" into "Nin Phone Slip Premium".
-function friendlyService(service: string | null) {
-  if (!service) return 'Verification slip';
-  return service
-    .toLowerCase()
-    .split('_')
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
-}
+type ServiceEntry = { id: string; reference: string; status: string; type: string; service: string | null; description: string; amount: number; created_at: string; updated_at: string; progress_notes: string | null; ticket_id: string | null };
+const title = (entry: ServiceEntry) => (entry.service ?? entry.type).toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+const money = (amount: number) => `₦${amount.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`;
 
 export default function SlipsHistoryPage() {
-  const [items, setItems] = useState<SlipEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    api
-      .get<{ status: boolean; data: SlipEntry[] }>('/verification/history/all')
-      .then((r) => setItems(r.data ?? []))
-      .catch((e) => setError(e instanceof Error ? e.message : 'Unable to load your slip history.'))
-      .finally(() => setLoading(false));
-  }, []);
-
-  return (
-    <AppShell>
-      <div className="max-w-3xl">
-        <header className="rounded-2xl border border-gold-500/40 bg-ink p-6 text-cream shadow-xl">
-          <p className="text-sm font-semibold text-gold-300">Account resources</p>
-          <h1 className="mt-1 text-3xl font-bold">Slips History</h1>
-          <p className="mt-2 text-sm text-cream/70">
-            Successful NIN, BVN and identity service slips from the last 7 days. Download the PDF again anytime within that window.
-          </p>
-        </header>
-
-        <section className="mt-6 space-y-3">
-          {error && <p className="rounded-xl bg-ember-500/10 p-4 text-sm text-ember-600">{error}</p>}
-          {loading && (
-            <div className="flex justify-center py-10">
-              <Loader2 className="animate-spin text-gold-500" />
-            </div>
-          )}
-          {!loading && !items.length && !error && (
-            <div className="rounded-2xl border border-gold-500/30 bg-ink-soft p-10 text-center text-cream/70">
-              <FileText className="mx-auto mb-3 text-gold-400" />
-              <p>No verification slips in the last 7 days.</p>
-            </div>
-          )}
-          {items.map((entry) => {
-            const base64 = entry.pdf_base64?.replace(/^data:application\/pdf;base64,/i, '');
-            const href = base64 ? `data:application/pdf;base64,${base64}` : entry.pdf_url?.startsWith('https://') ? entry.pdf_url : null;
-            return (
-              <article
-                key={entry.reference}
-                className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-gold-500/35 bg-ink p-4 text-cream shadow-lg"
-              >
-                <div className="min-w-0">
-                  <h2 className="font-semibold text-gold-200">{friendlyService(entry.service)}</h2>
-                  <p className="mt-1 break-all font-mono text-xs text-cream/65">{entry.reference}</p>
-                  <p className="mt-1 text-xs text-cream/65">{new Date(entry.created_at).toLocaleString()}</p>
-                </div>
-                {href ? (
-                  <a
-                    href={href}
-                    download={`${entry.reference}.pdf`}
-                    target={base64 ? undefined : '_blank'}
-                    rel={base64 ? undefined : 'noreferrer'}
-                    className="flex shrink-0 items-center gap-2 rounded-xl bg-gold-500 px-3 py-2 text-sm font-bold text-ink hover:bg-gold-400"
-                  >
-                    <Download size={16} /> Download
-                  </a>
-                ) : (
-                  <span className="shrink-0 rounded-full bg-cream/10 px-3 py-1 text-xs font-semibold capitalize text-cream/70">{entry.status}</span>
-                )}
-              </article>
-            );
-          })}
-        </section>
-      </div>
-    </AppShell>
-  );
+  const [items, setItems] = useState<ServiceEntry[]>([]); const [selected, setSelected] = useState<ServiceEntry | null>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState('');
+  useEffect(() => { api.get<{ data: ServiceEntry[] }>('/verification/service-history').then((r) => setItems(r.data ?? [])).catch((e) => setError(e instanceof Error ? e.message : 'Unable to load service history.')).finally(() => setLoading(false)); }, []);
+  return <AppShell><div className="mx-auto max-w-4xl"><header className="rounded-2xl border border-[#3b73c5] bg-[#0b2f73] p-6 text-white shadow-xl"><p className="text-sm font-semibold text-gold-300">Account resources</p><h1 className="mt-1 text-3xl font-bold">Service History</h1><p className="mt-2 text-sm text-blue-100">Every NIN, BVN, CAC, TIN, Birth Attestation, Newspaper and other service request in one secure place.</p></header><section className="mt-6 space-y-3">{error && <p className="rounded-xl bg-ember-500/10 p-4 text-sm text-ember-600">{error}</p>}{loading && <div className="flex justify-center py-10"><Loader2 className="animate-spin text-gold-500" /></div>}{!loading && !items.length && !error && <div className="rounded-2xl border border-blue-200 bg-white p-10 text-center text-[#0b2f73]/70"><FileText className="mx-auto mb-3 text-[#0b2f73]" /><p>No service requests yet.</p></div>}{items.map((entry) => <button key={entry.id} onClick={() => setSelected(entry)} className="flex w-full flex-wrap items-center justify-between gap-4 rounded-2xl border border-blue-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#3b73c5]"><div className="flex min-w-0 items-center gap-3"><div className="rounded-xl bg-[#0b2f73] p-3 text-white"><ReceiptText size={20} /></div><div className="min-w-0"><h2 className="truncate font-display font-bold text-[#0b2f73]">{title(entry)}</h2><p className="mt-1 break-all font-mono text-xs text-[#0b2f73]/65">{entry.reference}</p><p className="mt-1 flex items-center gap-1 text-xs text-[#0b2f73]/65"><Clock3 size={12} />{new Date(entry.created_at).toLocaleString()}</p></div></div><div className="ml-auto flex items-center gap-3"><div className="text-right"><p className="font-semibold text-[#0b2f73]">{money(entry.amount)}</p><span className={`mt-1 inline-block rounded-full px-2 py-1 text-[10px] font-bold ${entry.status === 'success' ? 'bg-emerald-100 text-emerald-700' : entry.status === 'pending' ? 'bg-gold-500/20 text-gold-700' : 'bg-rose-100 text-rose-700'}`}>{entry.status}</span></div><ChevronRight className="text-[#0b2f73]" /></div></button>)}</section>{selected && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#071d4d]/50 p-4" onClick={() => setSelected(null)}><article className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}><h2 className="font-display text-xl font-bold text-[#0b2f73]">{title(selected)}</h2><dl className="mt-5 space-y-3 text-sm"><div className="flex justify-between gap-4"><dt>Status</dt><dd className="font-bold capitalize">{selected.status}</dd></div><div className="flex justify-between gap-4"><dt>Amount</dt><dd className="font-bold">{money(selected.amount)}</dd></div><div className="flex justify-between gap-4"><dt>Requested</dt><dd>{new Date(selected.created_at).toLocaleString()}</dd></div><div className="flex justify-between gap-4"><dt>Reference</dt><dd className="break-all text-right font-mono text-xs">{selected.reference}</dd></div>{selected.ticket_id && <div className="flex justify-between gap-4"><dt>Ticket ID</dt><dd className="break-all text-right font-mono text-xs">{selected.ticket_id}</dd></div>}{selected.progress_notes && <div className="rounded-xl bg-blue-50 p-3 text-[#0b2f73]"><b>Progress update:</b> {selected.progress_notes}</div>}</dl><button onClick={() => setSelected(null)} className="mt-6 w-full rounded-xl bg-[#0b2f73] py-3 font-semibold text-white">Close</button></article></div>}</div></AppShell>;
 }

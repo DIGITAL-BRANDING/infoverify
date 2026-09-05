@@ -233,6 +233,44 @@ verificationRoutes.get('/history/all', async (req, res) => {
   res.json({ status: true, data: transactions.map(toSlipHistoryEntry) });
 });
 
+// One customer-facing register for every paid identity/business service.
+// Unlike the older slip-only view, this intentionally includes pending and
+// manual requests such as CAC, modifications, Birth Attestation and BVN CRM.
+verificationRoutes.get('/service-history', async (req, res) => {
+  const transactions = await prisma.transaction.findMany({
+    where: {
+      userId: req.user!.id,
+      type: { in: [
+        TransactionType.NIN_VERIFICATION, TransactionType.BVN_VERIFICATION,
+        TransactionType.IDENTITY_SERVICE_REQUEST, TransactionType.NIN_MODIFICATION,
+        TransactionType.BVN_LICENSE_ONBOARDING, TransactionType.CAC_SERVICE_REQUEST,
+        TransactionType.BVN_MODIFICATION, TransactionType.BIRTH_ATTESTATION,
+        TransactionType.NEWSPAPER_PUBLICATION, TransactionType.BVN_CRM
+      ] }
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 100
+  });
+  const data = transactions.map((tx) => {
+    const metadata = tx.metadata as Record<string, unknown> | null;
+    return {
+      id: tx.id,
+      reference: tx.reference,
+      status: tx.status.toLowerCase(),
+      type: tx.type,
+      service: typeof metadata?.service === 'string' ? metadata.service : null,
+      description: tx.description,
+      amount: Number(tx.amountKobo) / 100,
+      created_at: tx.createdAt.toISOString(),
+      updated_at: tx.updatedAt.toISOString(),
+      progress_notes: typeof metadata?.progress_notes === 'string' ? metadata.progress_notes : null,
+      ticket_id: typeof metadata?.ticket_id === 'string' ? metadata.ticket_id : null
+    };
+  });
+  res.set('Cache-Control', 'no-store');
+  res.json({ status: true, data });
+});
+
 // ── Slip lookups (synchronous) ────────────────────────────────────
 
 verificationRoutes.post('/nin/by-nin', async (req, res) => {

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Download, Loader2 } from 'lucide-react';
+import { Building2, Download, Loader2, Plus, Upload } from 'lucide-react';
 import AppShell from '../../components/AppShell';
 import { api, ApiError } from '../../lib/api';
 import { PinConfirmDialog } from '../../components/PinConfirmDialog';
-import { PageHeader, money, FORM_SECTION_CLASSES, FORM_INPUT_CLASSES, FORM_LABEL_CLASSES, FORM_HELP_CLASSES } from '../../components/verification/shared';
+import { PageHeader, money, FORM_SECTION_CLASSES, FORM_INPUT_CLASSES, FORM_LABEL_CLASSES } from '../../components/verification/shared';
 
 type CacType = 'sole' | 'partnership' | 'llc';
 type CacPriceRow = { type: CacType; title: string; unitPrice: number; isActive: boolean };
@@ -48,7 +48,12 @@ const STATUS_LABEL: Record<string, string> = { pending: 'Processing', success: '
 
 export default function CacServicesPage() {
   const [prices, setPrices] = useState<CacPriceRow[]>([]);
-  const [service, setService] = useState<CacType | ''>('');
+  const [service, setService] = useState<CacType | ''>('sole');
+  const [registrationTab, setRegistrationTab] = useState<'business' | 'company'>('business');
+  const [surname, setSurname] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [otherName, setOtherName] = useState('');
+  const [extraDirector, setExtraDirector] = useState(false);
   const [name1, setName1] = useState('');
   const [name2, setName2] = useState('');
   const [details, setDetails] = useState<Details>(EMPTY_DETAILS);
@@ -100,11 +105,13 @@ export default function CacServicesPage() {
         proposed_name_1: name1,
         proposed_name_2: name2 || undefined,
         ...details,
+        proprietor_full_name: [surname, firstName, otherName].filter(Boolean).join(' ') || details.proprietor_full_name,
         pin
       });
       if (!result.status) throw new Error(result.message);
       setMessage(`Request submitted — reference ${result.data?.reference}. We'll register your business and update the status below.`);
-      setService('');
+      setService('sole');
+      setSurname(''); setFirstName(''); setOtherName(''); setExtraDirector(false);
       setName1('');
       setName2('');
       setDetails(EMPTY_DETAILS);
@@ -119,38 +126,24 @@ export default function CacServicesPage() {
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-4xl">
-        <PageHeader title="CAC Services" subtitle="Business name and company registration. Requests are registered manually with CAC by our team — this isn't an instant service." />
+      <div className="mx-auto max-w-5xl">
+        <PageHeader title="CAC Registration" subtitle="Register your business or company with the Corporate Affairs Commission. Complete the details below and our team will process the request." />
 
         <section className={FORM_SECTION_CLASSES}>
           <form onSubmit={prepare}>
-            <label className={FORM_LABEL_CLASSES}>
-              Choose Service
-              <select
-                required
-                value={service}
-                onChange={(e) => setService(e.target.value as CacType)}
-                className={`mt-1 ${FORM_INPUT_CLASSES}`}
-              >
-                <option value="">-- Select Service --</option>
-                {SERVICE_OPTIONS.map((s) => {
-                  const price = prices.find((p) => p.type === s.value);
-                  return (
-                    <option key={s.value} value={s.value} disabled={price ? !price.isActive : false}>
-                      {s.label} ({money(price?.unitPrice)})
-                    </option>
-                  );
-                })}
-              </select>
-              <span className={`mt-1 block ${FORM_HELP_CLASSES}`}>
-                Registering an NGO, Club, Association, or a company with more than ₦1,000,000 share capital? These are quoted individually — contact support instead of using this form.
-              </span>
-            </label>
+            <div className="flex items-center gap-2 border-b border-blue-200">
+              <Building2 size={20} className="text-[#0b2f73]" /><h2 className="font-display text-lg font-bold text-[#0b2f73]">CAC Registration</h2>
+            </div>
+            <div className="mt-4 flex gap-5 border-b border-blue-100">
+              <button type="button" onClick={() => { setRegistrationTab('business'); setService('sole'); }} className={`border-b-2 px-3 pb-3 font-body text-sm font-semibold ${registrationTab === 'business' ? 'border-[#0b2f73] text-[#0b2f73]' : 'border-transparent text-[#0b2f73]/60'}`}>Business Name Registration</button>
+              <button type="button" onClick={() => { setRegistrationTab('company'); setService('llc'); }} className={`border-b-2 px-3 pb-3 font-body text-sm font-semibold ${registrationTab === 'company' ? 'border-[#0b2f73] text-[#0b2f73]' : 'border-transparent text-[#0b2f73]/60'}`}>Company Registration</button>
+            </div>
+            <p className="mt-4 rounded-xl bg-blue-50 px-4 py-3 font-body text-sm text-[#0b2f73]">Service cost: <b>{money(selectedPrice)}</b>. NGO, incorporated trustees, and companies above ₦1m share capital are quoted individually.</p>
 
             {service && (
               <>
-                <label className={`mt-4 block ${FORM_LABEL_CLASSES}`}>
-                  Proposed Name 1
+                <h3 className="mt-6 font-display font-bold text-[#0b2f73]">1. Proposed {registrationTab === 'business' ? 'Business' : 'Company'} Name(s)</h3>
+                <div className="mt-3 grid gap-4 sm:grid-cols-2"><label className={FORM_LABEL_CLASSES}>Option 1
                   <input
                     required
                     maxLength={200}
@@ -158,28 +151,25 @@ export default function CacServicesPage() {
                     className={`mt-1 ${FORM_INPUT_CLASSES}`}
                     value={name1}
                     onChange={(e) => setName1(e.target.value)}
-                  />
-                </label>
-                <label className={`mt-4 block ${FORM_LABEL_CLASSES}`}>
-                  Proposed Name 2 <span className="font-normal text-[#0b2f73]/50">(backup, optional)</span>
+                  /></label><label className={FORM_LABEL_CLASSES}>Option 2
                   <input
                     maxLength={200}
                     placeholder="e.g. Amana Global Ventures"
                     className={`mt-1 ${FORM_INPUT_CLASSES}`}
                     value={name2}
                     onChange={(e) => setName2(e.target.value)}
-                  />
-                </label>
+                  /></label></div>
 
-                <h3 className="mb-3 mt-5 border-t border-blue-100 pt-4 font-display text-sm font-bold text-[#0b2f73]">Business Details</h3>
+                {registrationTab === 'company' && <div className="mt-5"><p className="font-display font-bold text-[#0b2f73]">2. Type of Company</p><div className="mt-2 space-y-2 font-body text-sm text-[#0b2f73]"><label className="block"><input type="radio" checked readOnly className="mr-2" />Private Limited Company (Ltd)</label><label className="block"><input type="radio" disabled className="mr-2" />Public Limited Company (Plc)</label><label className="block"><input type="radio" disabled className="mr-2" />Incorporated Trustee / NGO</label></div></div>}
+                <h3 className="mb-3 mt-5 border-t border-blue-100 pt-4 font-display text-sm font-bold text-[#0b2f73]">{registrationTab === 'company' ? '3. Nature of Business / Objects of the Company' : 'Business Details'}</h3>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className={`sm:col-span-2 ${FORM_LABEL_CLASSES}`}>
                     Nature of Business
-                    <input required maxLength={300} placeholder="e.g. Retail of electronics" className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.business_nature} onChange={(e) => detailField('business_nature', e.target.value)} />
+                    <textarea required maxLength={300} placeholder="Describe your business activities" className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.business_nature} onChange={(e) => detailField('business_nature', e.target.value)} />
                   </label>
                   <label className={`sm:col-span-2 ${FORM_LABEL_CLASSES}`}>
                     Business Address
-                    <input required maxLength={300} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.business_address} onChange={(e) => detailField('business_address', e.target.value)} />
+                    <textarea required maxLength={300} placeholder="Enter your business address" className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.business_address} onChange={(e) => detailField('business_address', e.target.value)} />
                   </label>
                 </div>
 
@@ -187,10 +177,9 @@ export default function CacServicesPage() {
                   {service === 'sole' ? 'Proprietor' : service === 'partnership' ? 'Lead Partner' : 'Applicant'} Details
                 </h3>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <label className={`sm:col-span-2 ${FORM_LABEL_CLASSES}`}>
-                    Full Name
-                    <input required maxLength={200} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.proprietor_full_name} onChange={(e) => detailField('proprietor_full_name', e.target.value)} />
-                  </label>
+                  <label className={FORM_LABEL_CLASSES}>Surname<input required className={`mt-1 ${FORM_INPUT_CLASSES}`} value={surname} onChange={(e) => setSurname(e.target.value)} /></label>
+                  <label className={FORM_LABEL_CLASSES}>First Name<input required className={`mt-1 ${FORM_INPUT_CLASSES}`} value={firstName} onChange={(e) => setFirstName(e.target.value)} /></label>
+                  <label className={FORM_LABEL_CLASSES}>Other Name<input className={`mt-1 ${FORM_INPUT_CLASSES}`} value={otherName} onChange={(e) => setOtherName(e.target.value)} /></label>
                   <label className={FORM_LABEL_CLASSES}>
                     Phone
                     <input required inputMode="numeric" maxLength={11} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.proprietor_phone} onChange={(e) => detailField('proprietor_phone', e.target.value)} />
@@ -220,6 +209,10 @@ export default function CacServicesPage() {
                     <input required inputMode="numeric" maxLength={11} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={details.proprietor_nin} onChange={(e) => detailField('proprietor_nin', e.target.value)} />
                   </label>
                 </div>
+
+                {registrationTab === 'company' && <><button type="button" onClick={() => setExtraDirector(true)} className="mt-5 flex items-center gap-2 rounded-lg bg-[#0b2f73] px-4 py-2 font-body text-sm font-semibold text-white"><Plus size={16} /> Add Another Director/Proprietor</button>{extraDirector && <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4"><p className="font-display font-bold text-[#0b2f73]">Additional Director</p><p className="mt-1 font-body text-xs text-[#0b2f73]/70">Their information and valid ID can be supplied to our CAC team after this initial request is submitted.</p></div>}</>}
+
+                <div className="mt-6 border-t border-blue-100 pt-5"><h3 className="font-display font-bold text-[#0b2f73]">Supporting Documents</h3><p className="mt-1 font-body text-xs text-[#0b2f73]/70">Upload clear copies for all proprietors/directors. These documents are collected by our team after your request reference is created.</p><div className="mt-3 grid gap-3 sm:grid-cols-2">{['Valid ID document(s)', 'Passport photograph(s)', 'Proof of address', 'Signature specimen(s)'].map((label) => <label key={label} className={`rounded-xl border border-dashed border-blue-200 p-3 ${FORM_LABEL_CLASSES}`}>{label}<span className="mt-2 flex items-center gap-2 text-xs text-[#0b2f73]/70"><Upload size={14} /> Available after submission</span></label>)}</div></div>
 
                 <label className="mt-5 flex items-start gap-2 font-body text-xs text-[#0b2f73]/80">
                   <input type="checkbox" required checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 rounded border-blue-300 text-[#0b2f73] focus:ring-[#0b2f73]" />
