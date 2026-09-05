@@ -238,20 +238,19 @@ verificationRoutes.get('/history/all', async (req, res) => {
 // manual requests such as CAC, modifications, Birth Attestation and BVN CRM.
 verificationRoutes.get('/service-history', async (req, res) => {
   const transactions = await prisma.transaction.findMany({
-    where: {
-      userId: req.user!.id,
-      type: { in: [
-        TransactionType.NIN_VERIFICATION, TransactionType.BVN_VERIFICATION,
-        TransactionType.IDENTITY_SERVICE_REQUEST, TransactionType.NIN_MODIFICATION,
-        TransactionType.BVN_LICENSE_ONBOARDING, TransactionType.CAC_SERVICE_REQUEST,
-        TransactionType.BVN_MODIFICATION, TransactionType.BIRTH_ATTESTATION,
-        TransactionType.NEWSPAPER_PUBLICATION, TransactionType.BVN_CRM
-      ] }
-    },
+    // Do not send the enum list to Postgres. Some live databases are still
+    // awaiting newer enum migrations (e.g. BVN_MODIFICATION); putting such
+    // a value in an SQL IN clause makes the whole history page fail.
+    where: { userId: req.user!.id },
     orderBy: { createdAt: 'desc' },
     take: 100
   });
-  const data = transactions.map((tx) => {
+  const serviceTypes = new Set([
+    'NIN_VERIFICATION', 'BVN_VERIFICATION', 'IDENTITY_SERVICE_REQUEST',
+    'NIN_MODIFICATION', 'BVN_LICENSE_ONBOARDING', 'CAC_SERVICE_REQUEST',
+    'BVN_MODIFICATION', 'BIRTH_ATTESTATION', 'NEWSPAPER_PUBLICATION', 'BVN_CRM'
+  ]);
+  const data = transactions.filter((tx) => serviceTypes.has(tx.type)).map((tx) => {
     const metadata = tx.metadata as Record<string, unknown> | null;
     return {
       id: tx.id,
