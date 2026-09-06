@@ -48,6 +48,12 @@ const quickLinks: QuickLink[] = [
     icon: 'Edit3'
   },
   {
+    label: 'BVN CRM Requests',
+    description: 'BVN CRM TicketID follow-up requests awaiting agent handling',
+    href: `${ADMIN_ROOT_PATH}/resources/Transaction?filters.type=BVN_CRM`,
+    icon: 'Settings'
+  },
+  {
     label: 'Birth Attestation Requests',
     description: 'NPC Birth Attestation submissions awaiting manual processing',
     href: `${ADMIN_ROOT_PATH}/resources/Transaction?filters.type=BIRTH_ATTESTATION`,

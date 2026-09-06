@@ -29,6 +29,7 @@ const PENDING_SUMMARY_TYPES: { type: TransactionType; label: string }[] = [
   { type: TransactionType.CAC_SERVICE_REQUEST, label: 'CAC Registration' },
   { type: TransactionType.BVN_LICENSE_ONBOARDING, label: 'BVN License Enrollment' },
   { type: TransactionType.BVN_MODIFICATION, label: 'BVN Modification' },
+  { type: TransactionType.BVN_CRM, label: 'BVN CRM Follow-up' },
   { type: TransactionType.NIN_MODIFICATION, label: 'NIN Modification' },
   { type: TransactionType.BIRTH_ATTESTATION, label: 'Birth Attestation' },
   { type: TransactionType.NEWSPAPER_PUBLICATION, label: 'Newspaper Publication' }
