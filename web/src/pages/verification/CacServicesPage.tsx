@@ -56,6 +56,7 @@ export default function CacServicesPage() {
   const [otherName, setOtherName] = useState('');
   const [extraDirector, setExtraDirector] = useState(false);
   const [documents, setDocuments] = useState<SupportingDocument[]>([]);
+  const [uploadingLabel, setUploadingLabel] = useState<string | null>(null);
   const [name1, setName1] = useState('');
   const [name2, setName2] = useState('');
   const [details, setDetails] = useState<Details>(EMPTY_DETAILS);
@@ -77,8 +78,11 @@ export default function CacServicesPage() {
     if (!['application/pdf', 'image/jpeg', 'image/png'].includes(file.type) || file.size > 4 * 1024 * 1024) {
       setMessage('Use a PDF, JPG or PNG document under 4MB.'); return;
     }
-    const base64 = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1] ?? ''); reader.onerror = reject; reader.readAsDataURL(file); });
-    setDocuments((current) => [...current.filter((document) => document.label !== label), { label, name: file.name, mime_type: file.type as SupportingDocument['mime_type'], base64 }]);
+    setUploadingLabel(label);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1] ?? ''); reader.onerror = reject; reader.readAsDataURL(file); });
+      setDocuments((current) => [...current.filter((document) => document.label !== label), { label, name: file.name, mime_type: file.type as SupportingDocument['mime_type'], base64 }]);
+    } finally { setUploadingLabel(null); }
   }
 
   async function loadHistory() {
@@ -225,7 +229,7 @@ export default function CacServicesPage() {
 
                 {registrationTab === 'company' && <><button type="button" onClick={() => setExtraDirector(true)} className="mt-5 flex items-center gap-2 rounded-lg bg-[#0b2f73] px-4 py-2 font-body text-sm font-semibold text-white"><Plus size={16} /> Add Another Director/Proprietor</button>{extraDirector && <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4"><p className="font-display font-bold text-[#0b2f73]">Additional Director</p><p className="mt-1 font-body text-xs text-[#0b2f73]/70">Their information and valid ID can be supplied to our CAC team after this initial request is submitted.</p></div>}</>}
 
-                <div className="mt-6 border-t border-blue-100 pt-5"><h3 className="font-display font-bold text-[#0b2f73]">Supporting Documents</h3><p className="mt-1 font-body text-xs text-[#0b2f73]/70">Upload PDF, JPG or PNG files (maximum 4MB each). Your files are stored securely and made available to the CAC admin.</p><div className="mt-3 grid gap-3 sm:grid-cols-2">{['Valid ID document(s)', 'Passport photograph(s)', 'Proof of address', 'Signature specimen(s)'].map((label) => { const uploaded = documents.find((document) => document.label === label); return <label key={label} className={`rounded-xl border border-dashed border-blue-200 p-3 ${FORM_LABEL_CLASSES}`}>{label}<span className="mt-2 flex items-center gap-2 text-xs text-[#0b2f73]/70"><Upload size={14} /> {uploaded ? uploaded.name : 'Choose file'}</span><input type="file" accept="application/pdf,image/jpeg,image/png" className="mt-2 block w-full text-xs" onChange={(event) => void addDocument(label, event.target.files?.[0])} /></label>; })}</div></div>
+                <div className="mt-6 border-t border-blue-100 pt-5"><h3 className="font-display font-bold text-[#0b2f73]">Supporting Documents</h3><p className="mt-1 font-body text-xs text-[#0b2f73]/70">Upload PDF, JPG or PNG files (maximum 4MB each). Your files are stored securely and made available to the CAC admin.</p><div className="mt-3 grid gap-3 sm:grid-cols-2">{['Valid ID document(s)', 'Passport photograph(s)', 'Proof of address', 'Signature specimen(s)'].map((label) => { const uploaded = documents.find((document) => document.label === label); const uploading = uploadingLabel === label; return <label key={label} className={`rounded-xl border border-dashed border-blue-200 p-3 ${FORM_LABEL_CLASSES}`}>{label}<span className="mt-2 flex items-center gap-2 text-xs text-[#0b2f73]/70">{uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {uploading ? 'Preparing secure upload…' : uploaded ? `Ready: ${uploaded.name}` : 'Choose file'}</span><input disabled={uploading || Boolean(uploadingLabel)} type="file" accept="application/pdf,image/jpeg,image/png" className="mt-2 block w-full text-xs disabled:opacity-50" onChange={(event) => void addDocument(label, event.target.files?.[0])} /></label>; })}</div></div>
 
                 <label className="mt-5 flex items-start gap-2 font-body text-xs text-[#0b2f73]/80">
                   <input type="checkbox" required checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 rounded border-blue-300 text-[#0b2f73] focus:ring-[#0b2f73]" />
