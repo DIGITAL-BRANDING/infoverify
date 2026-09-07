@@ -27,26 +27,29 @@
  * minimum width and the row becomes scrollable instead of blank.
  */
 @media (max-width: 900px) {
-  table {
-    display: block !important;
-    width: 100% !important;
-    max-width: 100vw;
-    overflow-x: auto !important;
-    -webkit-overflow-scrolling: touch;
-  }
-  table thead,
-  table tbody,
-  table tr {
-    display: table;
-    width: 100%;
-    table-layout: fixed;
-  }
+  /* Preserve every data cell; then scroll the enclosing AdminJS panel. */
+  table thead, table tbody { display: table-row-group !important; }
+  table thead { display: table-header-group !important; }
+  table tr { display: table-row !important; }
   table th,
   table td {
-    min-width: 110px;
-    white-space: nowrap;
+    display: table-cell !important;
+    min-width: 130px !important;
+    white-space: nowrap !important;
     overflow: visible !important;
-    text-overflow: unset !important;
+    text-overflow: clip !important;
+  }
+  table {
+    display: table !important;
+    width: max-content !important;
+    min-width: 780px !important;
+    max-width: none !important;
+    table-layout: auto !important;
+  }
+  main, main > div, [class*="Table"], [class*="table"] { max-width: 100% !important; }
+  [class*="Table"], [class*="table"] {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
   }
   /* Belt-and-suspenders: make sure no ancestor is accidentally making list
      text transparent or zero-size. */

@@ -3,7 +3,7 @@ import { Box, Button, H2, H4, Icon, Text } from '@adminjs/design-system';
 
 const ADMIN_ROOT_PATH = '/admin';
 
-type PendingSummaryRow = { type: string; label: string; pending: number; new_last_24h: number };
+type PendingSummaryRow = { type: string; label: string; pending: number; new_last_24h: number; oldest_pending_at: string | null };
 type PendingSummary = { total_pending: number; total_new_last_24h: number; by_type: PendingSummaryRow[] };
 
 type QuickLink = {
@@ -215,6 +215,7 @@ function PendingRequestsPopup() {
                       {row.new_last_24h} new today
                     </Text>
                   )}
+                  {row.oldest_pending_at && <Text fontSize="xs" color="grey60" mt="sm">Oldest: {new Date(row.oldest_pending_at).toLocaleString()}</Text>}
                 </Box>
                 <a href={`${ADMIN_ROOT_PATH}/resources/Transaction?filters.type=${row.type}&filters.status=PENDING`} style={{ textDecoration: 'none' }}>
                   <Button size="sm" variant="text">
