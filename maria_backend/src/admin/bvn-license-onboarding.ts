@@ -1,7 +1,7 @@
 import type { Request, Router } from 'express';
 import { NotificationType, TransactionStatus, TransactionType } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
-import { decryptBvnLicensePII } from '../services/bvn-license-onboarding.service.js';
+import { decryptBvnLicensePII, renderBvnLicensePdf, type BvnLicenseInput } from '../services/bvn-license-onboarding.service.js';
 import { logAdminAction } from './audit.js';
 import { createUserDelivery } from '../services/user-delivery.service.js';
 import { notifyUser } from '../services/notification.service.js';
@@ -57,7 +57,11 @@ export function registerBvnLicenseRoutes(router: Router) {
     const pii = decryptBvnLicensePII(tx);
     const metadata = tx.metadata as Record<string, unknown> | null;
     // Generated PDFs are stored outside sealed PII; support older sealed data too.
-    const pdfBase64 = typeof metadata?.pdf_base64 === 'string' ? metadata.pdf_base64 : typeof pii?.pdf_base64 === 'string' ? pii.pdf_base64 : null;
+    // Regenerate the readable, branded form from the encrypted request data.
+    // This also upgrades older submissions that were generated with the old
+    // “MAJOR DATA-LINK” heading and unstructured one-column layout.
+    const trackingId = typeof metadata?.tracking_id === 'string' ? metadata.tracking_id : tx.reference;
+    const pdfBase64 = pii ? await renderBvnLicensePdf(pii as BvnLicenseInput, trackingId) : typeof metadata?.pdf_base64 === 'string' ? metadata.pdf_base64 : null;
     if (!pdfBase64) return res.status(404).send('PDF not found.');
     await logAdminAction({ adminId: admin.id, action: 'VIEW_TRANSACTION_PII', targetType: 'Transaction', targetId: tx.id, metadata: { tracking_id: (tx.metadata as any)?.tracking_id } });
     res.type('application/pdf').setHeader('Content-Disposition', `inline; filename="${tx.reference}.pdf"`).send(Buffer.from(pdfBase64.replace(/^data:application\/pdf;base64,/i, ''), 'base64'));

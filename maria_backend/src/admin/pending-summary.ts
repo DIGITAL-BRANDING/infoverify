@@ -42,23 +42,19 @@ export function registerPendingSummaryRoutes(router: Router) {
     }
 
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const rows = await Promise.all(
-      PENDING_SUMMARY_TYPES.map(async ({ type, label }) => {
-        try {
-          const [pending, newLast24h, oldest] = await Promise.all([
-            prisma.transaction.count({ where: { type, status: TransactionStatus.PENDING } }),
-            prisma.transaction.count({ where: { type, status: TransactionStatus.PENDING, createdAt: { gte: since24h } } }),
-            prisma.transaction.findFirst({ where: { type, status: TransactionStatus.PENDING }, orderBy: { createdAt: 'asc' }, select: { createdAt: true } })
-          ]);
-          return { type, label, pending, new_last_24h: newLast24h, oldest_pending_at: oldest?.createdAt.toISOString() ?? null };
-        } catch (error) {
-          // Older production databases may not yet have the newest enum value.
-          // Keep the admin dashboard alive; the migration can be applied later.
-          console.warn(`[admin] pending summary unavailable for ${String(type)}`, error instanceof Error ? error.message : error);
-          return { type, label, pending: 0, new_last_24h: 0, oldest_pending_at: null };
-        }
-      })
-    );
+    // Do one query without a `type IN (...)` clause, then group in memory.
+    // A live database may not yet have an enum member introduced by newer
+    // application code (e.g. BVN_MODIFICATION); sending that name to Postgres
+    // in a WHERE clause throws 22P02 and used to spam the production logs.
+    const pendingTransactions = await prisma.transaction.findMany({
+      where: { status: TransactionStatus.PENDING },
+      select: { type: true, createdAt: true }
+    });
+    const rows = PENDING_SUMMARY_TYPES.map(({ type, label }) => {
+      const matching = pendingTransactions.filter((transaction) => String(transaction.type) === String(type));
+      const oldest = matching.reduce<Date | null>((value, transaction) => !value || transaction.createdAt < value ? transaction.createdAt : value, null);
+      return { type, label, pending: matching.length, new_last_24h: matching.filter((transaction) => transaction.createdAt >= since24h).length, oldest_pending_at: oldest?.toISOString() ?? null };
+    });
 
     res.json({
       status: true,

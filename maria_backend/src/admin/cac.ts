@@ -28,6 +28,21 @@ function escapeHtml(value: string) {
  * JSON body, so this needs no file-upload middleware (multer etc) at all.
  */
 export function registerCacRoutes(router: Router) {
+  router.get('/cac/:transactionId/upload/:index', async (req: Request, res) => {
+    const admin = req.session?.adminUser;
+    if (!admin) return res.redirect('/admin/login');
+    if (admin.role === 'SUPPORT') return res.status(403).send('Support admins cannot download customer documents.');
+    const id = Array.isArray(req.params.transactionId) ? req.params.transactionId[0] : req.params.transactionId;
+    const index = Number(req.params.index);
+    const tx = await prisma.transaction.findUnique({ where: { id } });
+    if (!tx || tx.type !== TransactionType.CAC_SERVICE_REQUEST || !Number.isInteger(index) || index < 0) return res.status(404).send('Document not found.');
+    const uploads = decryptCacPII(tx)?.supporting_documents ?? [];
+    const upload = uploads[index];
+    if (!upload?.base64 || !upload.name || !upload.mime_type) return res.status(404).send('Document not found.');
+    await logAdminAction({ adminId: admin.id, action: 'DOWNLOAD_CAC_CUSTOMER_UPLOAD', targetType: 'Transaction', targetId: tx.id, metadata: { reference: tx.reference, fileName: upload.name } });
+    res.type(upload.mime_type).setHeader('Content-Disposition', `attachment; filename="${upload.name.replace(/[^a-zA-Z0-9._-]/g, '_')}"`).send(Buffer.from(upload.base64.replace(/^data:[^;]+;base64,/, ''), 'base64'));
+  });
+
   router.get('/cac/:transactionId/manage', async (req: Request, res) => {
     const admin = req.session?.adminUser;
     if (!admin) return res.redirect('/admin/login');
@@ -99,7 +114,7 @@ export function registerCacRoutes(router: Router) {
   </table>
 
   <h2>Customer uploads</h2>
-  ${supportingDocuments.length ? `<ul>${supportingDocuments.map((document, index) => `<li><a href="#" onclick="downloadUpload(event, ${index})">${escapeHtml(document.label)} — ${escapeHtml(document.name)}</a></li>`).join('')}</ul>` : '<p class="meta">No supporting documents were uploaded.</p>'}
+  ${supportingDocuments.length ? `<ul>${supportingDocuments.map((document, index) => `<li><a href="/admin/cac/${tx.id}/upload/${index}">${escapeHtml(document.label)} — ${escapeHtml(document.name)}</a></li>`).join('')}</ul>` : '<p class="meta">No supporting documents were uploaded.</p>'}
 
   ${hasCertificate ? `<p class="meta" style="margin-top:16px">A completed certificate is already attached. <a href="#" onclick="downloadCert(event)">Download it</a>.</p>` : ''}
 
@@ -119,7 +134,6 @@ export function registerCacRoutes(router: Router) {
   const txId = ${JSON.stringify(tx.id)};
   const certBase64 = ${JSON.stringify(hasCertificate ? pii!.certificate_pdf_base64 : null)};
   const formBase64 = ${JSON.stringify(hasSubmissionForm ? pii!.submission_pdf_base64 : null)};
-  const uploads = ${JSON.stringify(supportingDocuments)};
   const msg = document.getElementById('msg');
 
   function downloadCert(e) {
@@ -138,11 +152,6 @@ export function registerCacRoutes(router: Router) {
     a.href = 'data:application/pdf;base64,' + formBase64;
     a.download = ${JSON.stringify(tx.reference)} + '-submission-form.pdf';
     a.click();
-  }
-
-  function downloadUpload(e, index) {
-    e.preventDefault(); const upload = uploads[index]; if (!upload) return;
-    const a = document.createElement('a'); a.href = 'data:' + upload.mime_type + ';base64,' + upload.base64; a.download = upload.name; a.click();
   }
 
   document.getElementById('saveNotes').addEventListener('click', async () => {

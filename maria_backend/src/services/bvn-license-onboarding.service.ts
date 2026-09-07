@@ -6,7 +6,7 @@ import { debitWallet } from './wallet.service.js';
 export const GEO_POLITICAL_ZONES = ['North Central','North East','North West','South East','South South','South West'] as const;
 export type BvnLicenseInput = Record<string, string | boolean> & { geo_political_zone: typeof GEO_POLITICAL_ZONES[number]; consent: boolean };
 export function createBvnLicenseTrackingId() { return `MDL-BVN-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Math.random().toString(36).slice(2,8).toUpperCase()}`; }
-async function renderPdf(values:BvnLicenseInput, trackingId:string) {
+export async function renderBvnLicensePdf(values:BvnLicenseInput, trackingId:string) {
   const doc = new PDFDocument({ size: 'A4', margin: 48 }); const chunks:Buffer[]=[];
   doc.on('data',(c:Buffer)=>chunks.push(c));
   const done = new Promise<string>((resolve,reject)=>{ doc.on('end',()=>resolve(Buffer.concat(chunks).toString('base64'))); doc.on('error',reject); });
@@ -43,7 +43,7 @@ async function renderPdf(values:BvnLicenseInput, trackingId:string) {
 export async function submitBvnLicense(params:{userId:string;values:BvnLicenseInput;idempotencyKey?:string}) {
   const trackingId=createBvnLicenseTrackingId();
   const debit=await debitWallet({userId:params.userId,amount:10000,type:TransactionType.BVN_LICENSE_ONBOARDING,description:'BVN License Onboarding',metadata:{service:'BVN_LICENSE_ONBOARDING',tracking_id:trackingId,pii:sealPII(params.values)} as Prisma.InputJsonValue,idempotencyKey:params.idempotencyKey});
-  if (!debit.reused) { const pdf_base64=await renderPdf(params.values,trackingId); const tx=await prisma.transaction.findUnique({where:{id:debit.transaction.id}}); if(tx) await prisma.transaction.update({where:{id:tx.id},data:{metadata:{service:'BVN_LICENSE_ONBOARDING',tracking_id:trackingId,pdf_base64,pii:sealPII(params.values)} as Prisma.InputJsonValue}}); }
+  if (!debit.reused) { const pdf_base64=await renderBvnLicensePdf(params.values,trackingId); const tx=await prisma.transaction.findUnique({where:{id:debit.transaction.id}}); if(tx) await prisma.transaction.update({where:{id:tx.id},data:{metadata:{service:'BVN_LICENSE_ONBOARDING',tracking_id:trackingId,pdf_base64,pii:sealPII(params.values)} as Prisma.InputJsonValue}}); }
   const existing=(debit.transaction?.metadata as Record<string,unknown>|null)?.tracking_id;
   return {trackingId: (existing as string|undefined) ?? trackingId,reference:debit.reference,balanceAfter:debit.balanceAfter};
 }
