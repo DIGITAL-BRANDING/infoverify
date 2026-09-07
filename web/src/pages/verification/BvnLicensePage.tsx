@@ -75,7 +75,7 @@ export default function BvnLicensePage() {
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-4xl">
         <PageHeader
           title="BVN Agent Enrollment"
           subtitle="Submit an agent's full BVN license enrollment details for manual processing. Zaka iya duba enrollment report da kanka daga tarihin da ke ƙasa."
@@ -83,16 +83,17 @@ export default function BvnLicensePage() {
 
         <section className={FORM_SECTION_CLASSES}>
           {!result ? (
-            <form onSubmit={prepare} className="space-y-4">
-              <div>
-                <h3 className="mb-3 font-display text-sm font-bold text-[#0b2f73]">Agent Details</h3>
+            <form onSubmit={prepare} className="space-y-5">
+              <div className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-white p-4 sm:p-5">
+                <h3 className="mb-1 font-display text-base font-bold text-[#0b2f73]">1. Agent identity</h3>
+                <p className="mb-4 font-body text-xs text-[#0b2f73]/65">Enter the identity information exactly as it appears on the applicant’s records.</p>
                 <label className={FORM_LABEL_CLASSES}>
                   Agent Location
                   <input required placeholder="Where the agent operates" className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.agent_location} onChange={(e) => field('agent_location', e.target.value)} />
                 </label>
               </div>
 
-              <div className="grid gap-4 border-t border-blue-100 pt-4 sm:grid-cols-2">
+              <div className="rounded-2xl border border-blue-100 bg-white p-4 sm:p-5"><h3 className="mb-1 font-display text-base font-bold text-[#0b2f73]">2. Personal and contact details</h3><p className="mb-4 font-body text-xs text-[#0b2f73]/65">A valid phone number and email help us process the request.</p><div className="grid gap-4 sm:grid-cols-2">
                 <label className={FORM_LABEL_CLASSES}>
                   BVN
                   <input required inputMode="numeric" maxLength={11} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.bvn} onChange={(e) => field('bvn', e.target.value)} />
@@ -130,9 +131,9 @@ export default function BvnLicensePage() {
                   Alternative New Email <span className="font-normal text-[#0b2f73]/50">(optional)</span>
                   <input type="email" className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.alternative_email} onChange={(e) => field('alternative_email', e.target.value)} />
                 </label>
-              </div>
+              </div></div>
 
-              <div className="grid gap-4 border-t border-blue-100 pt-4 sm:grid-cols-2">
+              <div className="rounded-2xl border border-blue-100 bg-white p-4 sm:p-5"><h3 className="mb-1 font-display text-base font-bold text-[#0b2f73]">3. Bank account details</h3><p className="mb-4 font-body text-xs text-[#0b2f73]/65">Use the account details connected to the BVN licence request.</p><div className="grid gap-4 sm:grid-cols-2">
                 <label className={FORM_LABEL_CLASSES}>
                   Acct No
                   <input required inputMode="numeric" minLength={10} maxLength={12} className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.account_number} onChange={(e) => field('account_number', e.target.value)} />
@@ -145,9 +146,9 @@ export default function BvnLicensePage() {
                   Account Name
                   <input required className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.account_name} onChange={(e) => field('account_name', e.target.value)} />
                 </label>
-              </div>
+              </div></div>
 
-              <div className="grid gap-4 border-t border-blue-100 pt-4 sm:grid-cols-2">
+              <div className="rounded-2xl border border-blue-100 bg-white p-4 sm:p-5"><h3 className="mb-1 font-display text-base font-bold text-[#0b2f73]">4. Address and location</h3><p className="mb-4 font-body text-xs text-[#0b2f73]/65">Tell us where the agent is based.</p><div className="grid gap-4 sm:grid-cols-2">
                 <label className={`sm:col-span-2 ${FORM_LABEL_CLASSES}`}>
                   Address
                   <input required className={`mt-1 ${FORM_INPUT_CLASSES}`} value={form.address} onChange={(e) => field('address', e.target.value)} />
@@ -175,7 +176,7 @@ export default function BvnLicensePage() {
                     ))}
                   </select>
                 </label>
-              </div>
+              </div></div>
 
               <label className="flex items-start gap-2 border-t border-blue-100 pt-4 font-body text-xs text-[#0b2f73]/80">
                 <input type="checkbox" required checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 rounded border-blue-300 text-[#0b2f73] focus:ring-[#0b2f73]" />
