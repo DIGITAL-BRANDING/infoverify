@@ -57,6 +57,7 @@ export type CacApplicantDetails = {
   proprietor_date_of_birth: string;
   proprietor_gender: 'Male' | 'Female';
   proprietor_nin: string;
+  supporting_documents?: { label: string; name: string; mime_type: string; base64: string }[];
 };
 
 function serviceKeyFor(type: CacType) {

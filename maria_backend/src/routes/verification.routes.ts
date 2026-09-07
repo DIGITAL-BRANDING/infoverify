@@ -457,6 +457,12 @@ verificationRoutes.post('/cac', async (req, res) => {
       proprietor_date_of_birth: z.string().trim().min(8),
       proprietor_gender: z.enum(['Male', 'Female']),
       proprietor_nin: z.string().trim().length(11),
+      supporting_documents: z.array(z.object({
+        label: z.string().trim().min(1).max(80),
+        name: z.string().trim().min(1).max(200),
+        mime_type: z.enum(['application/pdf', 'image/jpeg', 'image/png']),
+        base64: z.string().min(20).max(7_000_000)
+      })).max(8).optional(),
       ...pinField
     })
     .parse(req.body);

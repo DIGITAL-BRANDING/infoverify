@@ -47,6 +47,7 @@ export function registerCacRoutes(router: Router) {
     const isPending = tx.status === 'PENDING';
     const hasCertificate = typeof pii?.certificate_pdf_base64 === 'string' && pii.certificate_pdf_base64.length > 0;
     const hasSubmissionForm = typeof pii?.submission_pdf_base64 === 'string' && pii.submission_pdf_base64.length > 0;
+    const supportingDocuments = Array.isArray(pii?.supporting_documents) ? pii.supporting_documents.filter((item): item is { label: string; name: string; mime_type: string; base64: string } => typeof item === 'object' && item !== null && typeof (item as Record<string, unknown>).base64 === 'string') : [];
 
     const detailRows: [string, string | undefined][] = [
       ['Nature of business', pii?.business_nature],
@@ -97,6 +98,9 @@ export function registerCacRoutes(router: Router) {
     ${detailRows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(value ?? '—')}</td></tr>`).join('')}
   </table>
 
+  <h2>Customer uploads</h2>
+  ${supportingDocuments.length ? `<ul>${supportingDocuments.map((document, index) => `<li><a href="#" onclick="downloadUpload(event, ${index})">${escapeHtml(document.label)} — ${escapeHtml(document.name)}</a></li>`).join('')}</ul>` : '<p class="meta">No supporting documents were uploaded.</p>'}
+
   ${hasCertificate ? `<p class="meta" style="margin-top:16px">A completed certificate is already attached. <a href="#" onclick="downloadCert(event)">Download it</a>.</p>` : ''}
 
   <h2>Progress note</h2>
@@ -115,6 +119,7 @@ export function registerCacRoutes(router: Router) {
   const txId = ${JSON.stringify(tx.id)};
   const certBase64 = ${JSON.stringify(hasCertificate ? pii!.certificate_pdf_base64 : null)};
   const formBase64 = ${JSON.stringify(hasSubmissionForm ? pii!.submission_pdf_base64 : null)};
+  const uploads = ${JSON.stringify(supportingDocuments)};
   const msg = document.getElementById('msg');
 
   function downloadCert(e) {
@@ -133,6 +138,11 @@ export function registerCacRoutes(router: Router) {
     a.href = 'data:application/pdf;base64,' + formBase64;
     a.download = ${JSON.stringify(tx.reference)} + '-submission-form.pdf';
     a.click();
+  }
+
+  function downloadUpload(e, index) {
+    e.preventDefault(); const upload = uploads[index]; if (!upload) return;
+    const a = document.createElement('a'); a.href = 'data:' + upload.mime_type + ';base64,' + upload.base64; a.download = upload.name; a.click();
   }
 
   document.getElementById('saveNotes').addEventListener('click', async () => {
