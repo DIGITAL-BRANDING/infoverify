@@ -252,6 +252,11 @@ verificationRoutes.get('/service-history', async (req, res) => {
   ]);
   const data = transactions.filter((tx) => serviceTypes.has(tx.type)).map((tx) => {
     const metadata = tx.metadata as Record<string, unknown> | null;
+    // Re-use the safe document extraction used by the verification-slip
+    // history.  These values are only returned for the authenticated owner
+    // of the transaction, and allow a successful request to be reopened or
+    // downloaded from the unified service history as well.
+    const slip = toSlipHistoryEntry(tx);
     return {
       id: tx.id,
       reference: tx.reference,
@@ -263,7 +268,9 @@ verificationRoutes.get('/service-history', async (req, res) => {
       created_at: tx.createdAt.toISOString(),
       updated_at: tx.updatedAt.toISOString(),
       progress_notes: typeof metadata?.progress_notes === 'string' ? metadata.progress_notes : null,
-      ticket_id: typeof metadata?.ticket_id === 'string' ? metadata.ticket_id : null
+      ticket_id: typeof metadata?.ticket_id === 'string' ? metadata.ticket_id : null,
+      pdf_base64: slip.pdf_base64,
+      pdf_url: slip.pdf_url
     };
   });
   res.set('Cache-Control', 'no-store');
