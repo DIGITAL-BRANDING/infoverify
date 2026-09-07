@@ -209,6 +209,9 @@ model UserDelivery {
   fileName    String
   mimeType    String
   filePath    String   @unique
+  /// Encrypted base64 document for database-backed deliveries. Keeping this
+  /// optional preserves access to older files already stored in Supabase.
+  inlineData  Json?
   fileSize    Int
   reference   String?
   createdByAdminId String
