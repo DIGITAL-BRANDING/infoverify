@@ -119,6 +119,11 @@ export const transactionResource: ResourceWithOptions = {
       viewPii: {
         actionType: 'record',
         icon: 'Eye',
+        // This is a headless action: it returns an audit-logged notice on the
+        // transaction page and does not need an AdminJS React action screen.
+        // Without this AdminJS opens /viewPii and shows “implement action
+        // component”, exactly as seen in the admin screenshot.
+        component: false,
         guard:
           'This decrypts and displays the NIN/BVN/name/phone/slip data on this transaction, and is logged to the audit trail. Continue?',
         isAccessible: ({ currentAdmin }) => {
@@ -379,25 +384,25 @@ export const transactionResource: ResourceWithOptions = {
         }
       },
       completeBvnLicense: {
-        actionType: 'record', icon: 'CheckCircle',
-        guard: 'Mark this BVN License request as completed?',
+        actionType: 'record', icon: 'Edit', component: Components.RedirectToManage,
         isAccessible: ({ currentAdmin, record }) => {
           const admin = currentAdmin as unknown as AdminSessionUser | undefined;
-          return !!admin && admin.role !== 'SUPPORT' && record?.params?.type === 'BVN_LICENSE_ONBOARDING' && record?.params?.status === 'PENDING';
+          return !!admin && admin.role !== 'SUPPORT' && record?.params?.type === 'BVN_LICENSE_ONBOARDING';
         },
         handler: async (_request, _response, context) => {
           const { record, currentAdmin } = context; const admin = currentAdmin as unknown as AdminSessionUser;
           if (!record || !admin) throw new Error('Missing record or admin context');
-          await prisma.transaction.update({ where: { id: record.params.id as string }, data: { status: TransactionStatus.SUCCESS } });
-          await logAdminAction({ adminId: admin.id, action: 'COMPLETE_BVN_LICENSE', targetType: 'Transaction', targetId: record.params.id as string, metadata: { reference: record.params.reference } });
-          return { record: record.toJSON(currentAdmin), notice: { message: 'BVN License request marked as completed.', type: 'success' } };
+          return { record: record.toJSON(currentAdmin) };
         }
       },
       downloadBvnLicensePdf: {
         actionType: 'record', icon: 'Download', component: Components.RedirectToManage,
         isAccessible: ({ currentAdmin, record }) => {
-          const admin = currentAdmin as unknown as AdminSessionUser | undefined;
-          return admin?.role === 'SUPER_ADMIN' && record?.params?.type === 'BVN_LICENSE_ONBOARDING';
+          // The submission-form download lives on the structured BVN Licence
+          // manage page, alongside completion/document delivery. Hiding this
+          // duplicate action avoids redirecting a “Download” click to that
+          // page without context.
+          return false;
         },
         handler: async (_request, _response, context) => {
           const { record, currentAdmin } = context; if (!record) throw new Error('Missing record');

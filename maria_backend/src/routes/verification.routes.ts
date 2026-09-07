@@ -144,7 +144,12 @@ function toSlipHistoryEntry(transaction: {
   // too, so an already-paid slip can be recovered without another call.
   const userData = pii?.user_data as Record<string, unknown> | undefined;
   const pdfBase64 =
-    typeof pii?.pdf_base64 === 'string' && pii.pdf_base64.trim().length > 0
+    // CAC completion stores the customer certificate under this key. Prefer
+    // it over the original submission form so “Document” means the actual
+    // completed certificate in the unified Service History too.
+    typeof pii?.certificate_pdf_base64 === 'string' && pii.certificate_pdf_base64.trim().length > 0
+      ? pii.certificate_pdf_base64
+      : typeof pii?.pdf_base64 === 'string' && pii.pdf_base64.trim().length > 0
       ? pii.pdf_base64
       : typeof userData?.pdf_base64 === 'string' && userData.pdf_base64.trim().length > 0
         ? userData.pdf_base64
