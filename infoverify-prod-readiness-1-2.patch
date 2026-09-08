@@ -1,0 +1,339 @@
+From cf29f9f9e41acbef76a84b49335b18840f677202 Mon Sep 17 00:00:00 2001
+From: Claude <dev@infoverify.local>
+Date: Tue, 8 Sep 2026 08:16:53 +0000
+Subject: [PATCH] Schedule daily PII purge in-process; add critical-error email
+ alerting; document missing .env vars
+
+---
+ maria_backend/.env.example                    | 40 ++++++++++++
+ maria_backend/src/config/env.ts               |  7 ++
+ maria_backend/src/lib/alerts.ts               | 64 +++++++++++++++++++
+ maria_backend/src/lib/email.ts                | 30 +++++++++
+ maria_backend/src/middleware/error.ts         | 11 ++++
+ .../src/scripts/purge-expired-pii.ts          | 41 ++++++++----
+ maria_backend/src/server.ts                   | 27 ++++++++
+ 7 files changed, 206 insertions(+), 14 deletions(-)
+ create mode 100644 maria_backend/src/lib/alerts.ts
+
+diff --git a/maria_backend/.env.example b/maria_backend/.env.example
+index f2f6d0c..8b6a007 100644
+--- a/maria_backend/.env.example
++++ b/maria_backend/.env.example
+@@ -114,3 +114,43 @@ WHATSAPP_TOKEN=
+ WHATSAPP_PHONE_NUMBER_ID=
+ WHATSAPP_VERIFY_TOKEN=
+ WHATSAPP_APP_SECRET=
++
++# --- Email (Resend) --------------------------------------------------------
++# Used for password-reset codes (routes/password.routes.ts) and critical-error
++# alert emails (lib/alerts.ts). Leave RESEND_API_KEY blank to disable both -
++# password reset then fails closed with a clear message instead of silently
++# pretending to send a code, and alert emails are simply skipped.
++RESEND_API_KEY=
++RESEND_FROM_EMAIL=MAJOR DATA-LINK <onboarding@resend.dev>
++# Where lib/alerts.ts sends a notification when something unexpected breaks
++# (an unhandled exception, or a 5xx from an error nobody wrote code to
++# expect). Optional - leave blank to disable alert emails entirely.
++ALERT_EMAIL=
++
++# --- Supabase (used for user-uploaded delivery/attachment files) -----------
++SUPABASE_URL=
++SUPABASE_SERVICE_ROLE_KEY=
++SUPABASE_STORAGE_BUCKET=user-deliveries
++
++# --- PII retention ----------------------------------------------------------
++# How many days of encrypted NIN/BVN/slip-PDF data (metadata.pii on a
++# Transaction) to keep before scripts/purge-expired-pii.ts blanks it out.
++# Runs automatically once a day from server.ts, and can also be triggered
++# manually with `npm run purge:pii`.
++PII_RETENTION_DAYS=90
++
++# --- Virtual account funding toggle -----------------------------------------
++# Master on/off switch for the KatPay-backed "fund by bank transfer to your
++# own virtual account" flow, independent of KATPAY_INSTANT_VA_ENABLED above
++# (that one controls auto-provisioning at signup; this one controls whether
++# the feature is exposed at all). Defaults to enabled.
++VIRTUAL_ACCOUNT_FUNDING_ENABLED=true
++
++# --- One-time super admin seed (scripts/seed-super-admin.ts) ----------------
++# Only read by `npm run seed:admin` - if any of these three are left blank,
++# that script interactively prompts for them instead. Safe to leave unset in
++# Railway; only useful for a fully non-interactive/scripted initial setup.
++SEED_ADMIN_EMAIL=
++SEED_ADMIN_NAME=
++SEED_ADMIN_PASSWORD=
++
+diff --git a/maria_backend/src/config/env.ts b/maria_backend/src/config/env.ts
+index fc434fa..7fcfa36 100644
+--- a/maria_backend/src/config/env.ts
++++ b/maria_backend/src/config/env.ts
+@@ -84,6 +84,13 @@ const EnvSchema = z.object({
+   // sending domain is verified in the Resend dashboard.
+   RESEND_API_KEY: z.string().optional(),
+   RESEND_FROM_EMAIL: z.string().default('MAJOR DATA-LINK <onboarding@resend.dev>'),
++  // Where lib/alerts.ts sends critical-error notifications (unhandled
++  // exceptions, uncaught rejections, and 5xx responses from unexpected -
++  // i.e. non-ApiError - errors). Optional: unset just means alerting is
++  // disabled and everything still only goes to console/Railway logs, same
++  // as before this existed. Reuses RESEND_API_KEY/RESEND_FROM_EMAIL above -
++  // no separate provider needed.
++  ALERT_EMAIL: z.string().email().optional(),
+   // NOTE: z.coerce.boolean() would parse the STRING "false" as true (JS's
+   // Boolean("false") === true Ã¢â‚¬â€ any non-empty string is truthy). This explicit
+   // string comparison is what actually respects MOCK_PROVIDER=false in .env.
+diff --git a/maria_backend/src/lib/alerts.ts b/maria_backend/src/lib/alerts.ts
+new file mode 100644
+index 0000000..0f1d546
+--- /dev/null
++++ b/maria_backend/src/lib/alerts.ts
+@@ -0,0 +1,64 @@
++import { env } from '../config/env.js';
++import { sendAlertEmail } from './email.js';
++
++/**
++ * The one piece of "does anyone find out when something breaks" this app
++ * has, short of someone manually reading Railway logs (which is how every
++ * production bug so far - the BVN_MODIFICATION enum error, the CAC
++ * formidable/req.body bug - actually got noticed). Call this from:
++ *   - middleware/error.ts, for an unexpected (non-ApiError) 500
++ *   - server.ts's uncaughtException/unhandledRejection handlers
++ *
++ * Deliberately a thin wrapper around lib/email.ts's sendAlertEmail rather
++ * than a new external service (Sentry/Bugsnag/etc) - it works the moment
++ * ALERT_EMAIL is set in Railway, with zero new signups, reusing the
++ * Resend integration already wired up for password resets. A dedicated
++ * error-tracking service would give richer detail (stack traces linked to
++ * source, deduping across deploys, etc) and is worth adding later, but
++ * this is the difference between "nobody knows until a customer or admin
++ * reports it" and "an email arrives within seconds" - the highest-value
++ * part of that gap, for the least effort, today.
++ */
++
++const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
++const lastSentAt = new Map<string, number>();
++
++/** Collapses an error down to a short, stable-ish key so the exact same
++ *  failure repeating in a crash loop only sends one email per window,
++ *  instead of one per request/iteration. */
++function fingerprint(context: string, error: unknown): string {
++  const message = error instanceof Error ? error.message : String(error);
++  return `${context}:${message}`.slice(0, 200);
++}
++
++export async function alertCriticalError(context: string, error: unknown): Promise<void> {
++  // Always log first and unconditionally - the alert email is a bonus on
++  // top of that, never a replacement for it, and must never be the reason
++  // an error goes unlogged if this function itself has a problem.
++  console.error(`[alert] ${context}:`, error);
++
++  if (!env.ALERT_EMAIL) return;
++
++  const key = fingerprint(context, error);
++  const now = Date.now();
++  const last = lastSentAt.get(key);
++  if (last && now - last < RATE_LIMIT_WINDOW_MS) return;
++  lastSentAt.set(key, now);
++
++  const stack = error instanceof Error ? error.stack : undefined;
++  const body = [
++    `Context: ${context}`,
++    `Time: ${new Date().toISOString()}`,
++    `Environment: ${env.NODE_ENV}`,
++    '',
++    stack ?? String(error)
++  ].join('\n');
++
++  try {
++    await sendAlertEmail(`[MARIA backend] ${context}`, body);
++  } catch (sendError) {
++    // Never let a failure to send the ALERT about an error become a
++    // second unhandled error itself.
++    console.error('[alert] failed to send alert email', sendError);
++  }
++}
+diff --git a/maria_backend/src/lib/email.ts b/maria_backend/src/lib/email.ts
+index f29992a..dbdf39c 100644
+--- a/maria_backend/src/lib/email.ts
++++ b/maria_backend/src/lib/email.ts
+@@ -48,3 +48,33 @@ export async function sendPasswordResetEmail(email: string, code: string) {
+     return { sent: false };
+   }
+ }
++
++/**
++ * Used by lib/alerts.ts for critical-error notifications - reuses the same
++ * Resend client/from-address as the password reset email above, just a
++ * different recipient (env.ALERT_EMAIL) and plain-text body since this is
++ * an internal ops notification, not something a customer sees.
++ */
++export async function sendAlertEmail(subject: string, body: string) {
++  const resend = getClient();
++  if (!resend || !env.ALERT_EMAIL) {
++    return { sent: false };
++  }
++
++  try {
++    const { error } = await resend.emails.send({
++      from: env.RESEND_FROM_EMAIL,
++      to: env.ALERT_EMAIL,
++      subject,
++      text: body
++    });
++    if (error) {
++      console.error('[email] Resend rejected the alert email', error);
++      return { sent: false };
++    }
++    return { sent: true };
++  } catch (err) {
++    console.error('[email] Failed to send alert email', err);
++    return { sent: false };
++  }
++}
+diff --git a/maria_backend/src/middleware/error.ts b/maria_backend/src/middleware/error.ts
+index 28096ab..adfc510 100644
+--- a/maria_backend/src/middleware/error.ts
++++ b/maria_backend/src/middleware/error.ts
+@@ -1,4 +1,5 @@
+ import type { NextFunction, Request, Response } from 'express';
++import { alertCriticalError } from '../lib/alerts.js';
+ 
+ export class ApiError extends Error {
+   constructor(
+@@ -64,6 +65,16 @@ export function errorHandler(
+   // library internals, occasionally fragments of a query or connection
+   // string. That's fine to log (done above) but must never reach the
+   // client directly in production - only a generic message does.
++  //
++  // This is also the one branch worth emailing someone about (see
++  // lib/alerts.ts) - ApiError/ZodError above are expected, routine
++  // rejections (bad input, insufficient balance, etc) that happen
++  // constantly and would just be noise; this branch is specifically
++  // "something actually broke that nobody wrote code to expect".
++  // Fire-and-forget - never delay or fail the response waiting on an
++  // alert email.
++  void alertCriticalError('Unhandled request error', error);
++
+   const statusCode = (error as any)?.statusCode || 500;
+   const message =
+     process.env.NODE_ENV === 'production'
+diff --git a/maria_backend/src/scripts/purge-expired-pii.ts b/maria_backend/src/scripts/purge-expired-pii.ts
+index 318d03d..5dc9d50 100644
+--- a/maria_backend/src/scripts/purge-expired-pii.ts
++++ b/maria_backend/src/scripts/purge-expired-pii.ts
+@@ -11,17 +11,21 @@ import { prisma } from '../lib/prisma.js';
+  *
+  * This is data-minimization, layered on top of the field-level encryption
+  * in src/lib/pii.ts: encryption protects the data while it's retained,
+- * this makes sure it isn't retained forever "just in case". Run on a
+- * schedule (Railway Cron Job / any external scheduler calling
+- * `npm run purge:pii`, or a plain `cron` entry on your own box) - it does
+- * nothing destructive if run more than once, since already-purged rows are
+- * simply skipped.
++ * this makes sure it isn't retained forever "just in case". Called two
++ * ways:
++ *   - `npm run purge:pii` (see the CLI wrapper at the bottom of this file) -
++ *     for a Railway Cron Job, an external scheduler, or a manual one-off run.
++ *   - Automatically once a day from server.ts, so this actually runs
++ *     without anyone having to set up a separate cron service - see the
++ *     comment there for why that's the default rather than only the above.
++ * Idempotent either way - already-purged rows are simply skipped, so
++ * running it twice (or both ways at once) does nothing destructive.
+  *
+  * PII_RETENTION_DAYS controls the window (default 90). Only touches
+  * SUCCESS/FAILED transactions - a still-PENDING async ticket needs its PII
+  * to eventually be checked/resolved, so it's never a purge candidate.
+  */
+-async function main() {
++export async function purgeExpiredPii() {
+   const retentionDays = Number(process.env.PII_RETENTION_DAYS ?? 90);
+   if (!Number.isFinite(retentionDays) || retentionDays <= 0) {
+     throw new Error(`Invalid PII_RETENTION_DAYS: ${process.env.PII_RETENTION_DAYS}`);
+@@ -60,15 +64,24 @@ async function main() {
+     purged += 1;
+   }
+ 
++  const summary = { retentionDays, cutoff: cutoff.toISOString(), purged, skipped, candidates: candidates.length };
+   console.log(
+-    `[purge-expired-pii] retention=${retentionDays}d cutoff=${cutoff.toISOString()} ` +
+-      `purged=${purged} skipped=${skipped} (of ${candidates.length} candidates)`
++    `[purge-expired-pii] retention=${summary.retentionDays}d cutoff=${summary.cutoff} ` +
++      `purged=${summary.purged} skipped=${summary.skipped} (of ${summary.candidates} candidates)`
+   );
++  return summary;
+ }
+ 
+-main()
+-  .then(() => process.exit(0))
+-  .catch((error) => {
+-    console.error('[purge-expired-pii] failed:', error);
+-    process.exit(1);
+-  });
++// CLI entry point - only runs when this file is executed directly (`npm run
++// purge:pii` / `tsx src/scripts/purge-expired-pii.ts`), NOT when server.ts
++// imports `purgeExpiredPii` for the daily in-process schedule below, since
++// that import must not also trigger a second, duplicate run every time the
++// server boots.
++if (import.meta.url === `file://${process.argv[1]}`) {
++  purgeExpiredPii()
++    .then(() => process.exit(0))
++    .catch((error) => {
++      console.error('[purge-expired-pii] failed:', error);
++      process.exit(1);
++    });
++}
+diff --git a/maria_backend/src/server.ts b/maria_backend/src/server.ts
+index 510fb3e..437d1ee 100644
+--- a/maria_backend/src/server.ts
++++ b/maria_backend/src/server.ts
+@@ -16,14 +16,22 @@
+ import { env } from './config/env.js';
+ import { createApp } from './app.js';
+ import { prisma } from './lib/prisma.js';
++import { alertCriticalError } from './lib/alerts.js';
++import { purgeExpiredPii } from './scripts/purge-expired-pii.js';
+ 
+ process.on('uncaughtException', (error) => {
+   console.error('[server] uncaught exception', error);
++  // Best-effort: the process is exiting right after this regardless, so
++  // this can't be awaited - but an uncaught exception is by definition the
++  // most important thing this alerting will ever report, so it's worth the
++  // attempt even without a guarantee the email makes it out before exit.
++  void alertCriticalError('Uncaught exception (process exiting)', error);
+   process.exit(1);
+ });
+ 
+ process.on('unhandledRejection', (reason) => {
+   console.error('[server] unhandled rejection', reason);
++  void alertCriticalError('Unhandled promise rejection (process exiting)', reason);
+   process.exit(1);
+ });
+ 
+@@ -84,6 +92,25 @@ async function startServer() {
+       console.log(`MARIA Digital Solutions backend listening on port ${env.PORT}`);
+     });
+ 
++    // Daily PII purge, running in-process rather than requiring a separate
++    // Railway Cron Job/external scheduler to be set up - `npm run
++    // purge:pii` still works standalone for anyone who prefers that
++    // instead (see purge-expired-pii.ts), but leaving it as opt-in-only
++    // meant it was never actually wired up anywhere: PII was accumulating
++    // past its retention window indefinitely. A short delay before the
++    // first run avoids adding a slow query to the critical first seconds
++    // after a fresh deploy; every run after that is a full 24h apart.
++    // Errors are caught and logged (+ alertCriticalError below) but never
++    // crash the server - a failed purge attempt should not take the whole
++    // app down, it'll simply retry tomorrow.
++    const PII_PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
++    setTimeout(() => {
++      void purgeExpiredPii().catch((error) => void alertCriticalError('Scheduled PII purge failed', error));
++      setInterval(() => {
++        void purgeExpiredPii().catch((error) => void alertCriticalError('Scheduled PII purge failed', error));
++      }, PII_PURGE_INTERVAL_MS);
++    }, 60_000);
++
+     server.on('error', (err: NodeJS.ErrnoException) => {
+       if (err.code === 'EADDRINUSE') {
+         console.error(`[server] Port ${env.PORT} is already in use`);
+-- 
+2.43.0
+

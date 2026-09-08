@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
+import { alertCriticalError } from '../lib/alerts.js';
 
 export class ApiError extends Error {
   constructor(
@@ -64,6 +65,16 @@ export function errorHandler(
   // library internals, occasionally fragments of a query or connection
   // string. That's fine to log (done above) but must never reach the
   // client directly in production - only a generic message does.
+  //
+  // This is also the one branch worth emailing someone about (see
+  // lib/alerts.ts) - ApiError/ZodError above are expected, routine
+  // rejections (bad input, insufficient balance, etc) that happen
+  // constantly and would just be noise; this branch is specifically
+  // "something actually broke that nobody wrote code to expect".
+  // Fire-and-forget - never delay or fail the response waiting on an
+  // alert email.
+  void alertCriticalError('Unhandled request error', error);
+
   const statusCode = (error as any)?.statusCode || 500;
   const message =
     process.env.NODE_ENV === 'production'

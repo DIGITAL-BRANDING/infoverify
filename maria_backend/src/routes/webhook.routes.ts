@@ -25,6 +25,26 @@ function normalizeKatpayStatus(value: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * Picks the field to use as this deposit's dedup key for
+ * creditDirectDepositByAccountNumber's providerRef. Exported and unit-tested
+ * on its own (see __tests__/webhook.routes.reference.test.ts) because this
+ * exact ordering caused a real production incident: `reference` was tried
+ * first, but for a bank transfer that field is frequently just the
+ * narration text (sender name/account), which stays IDENTICAL across every
+ * transfer the same sender makes into the same account. A user who
+ * transferred ₦10,000 then two separate ₦250 deposits had all three land
+ * with the same `transaction.reference` narration - the first claimed that
+ * text as its providerRef, and the other two were silently treated as
+ * "already processed" duplicates (200 back to KatPay, dashboard shows
+ * "Delivered", wallet never credited). `id` is KatPay's own per-event
+ * identifier and is tried first now for exactly that reason.
+ */
+export function pickKatpayTransactionReference(transaction: Record<string, unknown>): string | undefined {
+  const raw = transaction.id ?? transaction.order_no ?? transaction.orderNo ?? transaction.reference;
+  return raw == null ? undefined : String(raw).trim();
+}
+
 export const webhookRoutes = Router();
 
 // Public, non-sensitive connectivity check for KatPay's dashboard setup.
@@ -253,12 +273,10 @@ webhookRoutes.post('/katpay', async (req, res) => {
         virtualAccount.accountNumber ??
         event.data?.customer?.account_number;
       const accountNumber = rawAccountNumber == null ? undefined : String(rawAccountNumber).trim();
-      const rawReference =
-        transaction.reference ??
-        transaction.order_no ??
-        transaction.orderNo ??
-        transaction.id;
-      const reference = rawReference == null ? undefined : String(rawReference).trim();
+      // Prefer KatPay's own event/transaction id first - see
+      // pickKatpayTransactionReference()'s comment above for why
+      // `transaction.reference` alone caused a real production incident.
+      const reference = pickKatpayTransactionReference(transaction);
       const rawAmountCents = transaction.order_amount_cents ?? transaction.amount_cents;
       const amountKobo =
         rawAmountCents != null

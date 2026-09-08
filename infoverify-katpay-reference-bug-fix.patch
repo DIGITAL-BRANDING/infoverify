@@ -1,0 +1,173 @@
+From bf74df73b68c2ddceec4f4fd54048e0c2b794004 Mon Sep 17 00:00:00 2001
+From: Claude <dev@infoverify.local>
+Date: Mon, 7 Sep 2026 22:39:20 +0000
+Subject: [PATCH] Fix KatPay webhook silently skipping deposits that share a
+ bank narration
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Root cause of the reported incident: a user's ₦10,000 transfer credited
+fine, but two later ₦250 transfers into the same virtual account both
+showed 'Delivered' on KatPay's dashboard while never reaching the
+wallet balance.
+
+webhook.routes.ts built its dedup key (passed to
+creditDirectDepositByAccountNumber as ) by trying
+ before . For a bank transfer,
+ is frequently just the narration text (sender name/
+account), which is IDENTICAL across every transfer the same sender
+makes into the same account - wallet.service.ts's own providerRef
+comment already flagged this exact risk. The ₦10,000 transfer claimed
+that narration text as its providerRef; the next two ₦250 transfers
+shared the same reference, so creditDirectDepositByAccountNumber's
+existing-transaction dedup check (working exactly as designed) treated
+them as already-processed duplicates of the first - 200 back to
+KatPay, wallet untouched, and nothing in the logs distinguishes this
+from a genuine redelivered webhook.
+
+Fix: try  first (KatPay's own per-event identifier),
+falling back to order_no/orderNo/reference in that order - same
+fallback chain as before, just reordered. Extracted the selection into
+its own exported pickKatpayTransactionReference() so it's unit-testable
+without needing a live raw-body+HMAC HTTP harness for the whole route.
+
+New test file (webhook.routes.reference.test.ts, 4 tests) locks in the
+exact failure mode: three payloads sharing one  narration
+but distinct uid=0(root) gid=0(root) groups=0(root)s must yield three distinct keys.
+
+Verified: full suite now 177 passed (173 existing + 4 new), zero
+regressions. tsc shows zero errors on either touched file.
+
+Does NOT retroactively credit the two ₦250 deposits already silently
+skipped in production - those need a manual wallet adjustment via
+/admin/user-wallet (search the user, apply a ₦500 credit, reason:
+'KatPay VA deposits sharing narration ref, not auto-credited - see
+webhook.routes.ts fix').
+---
+ .../webhook.routes.reference.test.ts          | 64 +++++++++++++++++++
+ maria_backend/src/routes/webhook.routes.ts    | 30 +++++++--
+ 2 files changed, 88 insertions(+), 6 deletions(-)
+ create mode 100644 maria_backend/src/routes/__tests__/webhook.routes.reference.test.ts
+
+diff --git a/maria_backend/src/routes/__tests__/webhook.routes.reference.test.ts b/maria_backend/src/routes/__tests__/webhook.routes.reference.test.ts
+new file mode 100644
+index 0000000..e39d02a
+--- /dev/null
++++ b/maria_backend/src/routes/__tests__/webhook.routes.reference.test.ts
+@@ -0,0 +1,64 @@
++import { describe, expect, it, vi } from 'vitest';
++
++// webhook.routes.ts pulls in prisma, wallet.service.js (which also imports
++// prisma), paystack/katpay services, and the WhatsApp session service - none
++// of which this test needs, since pickKatpayTransactionReference() is a
++// pure function. Mocked out the same way wallet.service.katpay.test.ts mocks
++// prisma, so importing the route module here doesn't require a real
++// generated Prisma client or live network access.
++vi.mock('../../lib/prisma.js', () => ({ prisma: {} }));
++vi.mock('../../services/wallet.service.js', () => ({
++  creditDirectDeposit: vi.fn(),
++  creditDirectDepositByAccountNumber: vi.fn(),
++  creditWalletByReference: vi.fn(),
++  markFundingFailed: vi.fn()
++}));
++vi.mock('../../services/paystack.service.js', () => ({ paystackService: {} }));
++vi.mock('../../services/katpay.service.js', () => ({ katpayService: {} }));
++vi.mock('../../services/whatsapp-session.service.js', () => ({ advanceSession: vi.fn() }));
++
++const { pickKatpayTransactionReference } = await import('../webhook.routes.js');
++
++/**
++ * Regression coverage for a real production incident: a user's ₦10,000
++ * transfer credited fine, but two subsequent ₦250 transfers into the same
++ * virtual account both showed "Delivered" on KatPay's dashboard while never
++ * reaching the wallet balance. Root cause was webhook.routes.ts trying
++ * `transaction.reference` before `transaction.id` when building the dedup
++ * key for creditDirectDepositByAccountNumber - for a bank transfer,
++ * `reference` is frequently just the narration text (sender name/account),
++ * which is identical across every transfer the same sender makes into the
++ * same account, so the second and third deposits were silently treated as
++ * "already processed" duplicates of the first.
++ */
++describe('pickKatpayTransactionReference', () => {
++  it('prefers the per-event id over a possibly-repeating narration reference', () => {
++    // The exact failure mode: three transfers from the same sender share one
++    // narration-style `reference`, but each has KatPay's own distinct `id`.
++    const first = pickKatpayTransactionReference({ id: 'evt_1', reference: 'JOHN DOE TRANSFER', order_amount: 10000 });
++    const second = pickKatpayTransactionReference({ id: 'evt_2', reference: 'JOHN DOE TRANSFER', order_amount: 250 });
++    const third = pickKatpayTransactionReference({ id: 'evt_3', reference: 'JOHN DOE TRANSFER', order_amount: 250 });
++
++    expect(first).toBe('evt_1');
++    expect(second).toBe('evt_2');
++    expect(third).toBe('evt_3');
++    // The whole point: three distinct events must not collapse to one key.
++    expect(new Set([first, second, third]).size).toBe(3);
++  });
++
++  it('falls back to order_no, then orderNo, then reference, when id is absent', () => {
++    expect(pickKatpayTransactionReference({ order_no: 'ORD-1', reference: 'NARRATION' })).toBe('ORD-1');
++    expect(pickKatpayTransactionReference({ orderNo: 'ORD-2', reference: 'NARRATION' })).toBe('ORD-2');
++    expect(pickKatpayTransactionReference({ reference: 'NARRATION' })).toBe('NARRATION');
++  });
++
++  it('trims whitespace and stringifies non-string ids', () => {
++    expect(pickKatpayTransactionReference({ id: '  evt_9  ' })).toBe('evt_9');
++    expect(pickKatpayTransactionReference({ id: 12345 })).toBe('12345');
++  });
++
++  it('returns undefined when nothing usable is present', () => {
++    expect(pickKatpayTransactionReference({})).toBeUndefined();
++    expect(pickKatpayTransactionReference({ id: null, reference: undefined })).toBeUndefined();
++  });
++});
+diff --git a/maria_backend/src/routes/webhook.routes.ts b/maria_backend/src/routes/webhook.routes.ts
+index 6b5a2a8..4c6dad6 100644
+--- a/maria_backend/src/routes/webhook.routes.ts
++++ b/maria_backend/src/routes/webhook.routes.ts
+@@ -25,6 +25,26 @@ function normalizeKatpayStatus(value: unknown): string | undefined {
+   return undefined;
+ }
+ 
++/**
++ * Picks the field to use as this deposit's dedup key for
++ * creditDirectDepositByAccountNumber's providerRef. Exported and unit-tested
++ * on its own (see __tests__/webhook.routes.reference.test.ts) because this
++ * exact ordering caused a real production incident: `reference` was tried
++ * first, but for a bank transfer that field is frequently just the
++ * narration text (sender name/account), which stays IDENTICAL across every
++ * transfer the same sender makes into the same account. A user who
++ * transferred ₦10,000 then two separate ₦250 deposits had all three land
++ * with the same `transaction.reference` narration - the first claimed that
++ * text as its providerRef, and the other two were silently treated as
++ * "already processed" duplicates (200 back to KatPay, dashboard shows
++ * "Delivered", wallet never credited). `id` is KatPay's own per-event
++ * identifier and is tried first now for exactly that reason.
++ */
++export function pickKatpayTransactionReference(transaction: Record<string, unknown>): string | undefined {
++  const raw = transaction.id ?? transaction.order_no ?? transaction.orderNo ?? transaction.reference;
++  return raw == null ? undefined : String(raw).trim();
++}
++
+ export const webhookRoutes = Router();
+ 
+ // Public, non-sensitive connectivity check for KatPay's dashboard setup.
+@@ -253,12 +273,10 @@ webhookRoutes.post('/katpay', async (req, res) => {
+         virtualAccount.accountNumber ??
+         event.data?.customer?.account_number;
+       const accountNumber = rawAccountNumber == null ? undefined : String(rawAccountNumber).trim();
+-      const rawReference =
+-        transaction.reference ??
+-        transaction.order_no ??
+-        transaction.orderNo ??
+-        transaction.id;
+-      const reference = rawReference == null ? undefined : String(rawReference).trim();
++      // Prefer KatPay's own event/transaction id first - see
++      // pickKatpayTransactionReference()'s comment above for why
++      // `transaction.reference` alone caused a real production incident.
++      const reference = pickKatpayTransactionReference(transaction);
+       const rawAmountCents = transaction.order_amount_cents ?? transaction.amount_cents;
+       const amountKobo =
+         rawAmountCents != null
+-- 
+2.43.0
+

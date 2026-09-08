@@ -48,3 +48,33 @@ export async function sendPasswordResetEmail(email: string, code: string) {
     return { sent: false };
   }
 }
+
+/**
+ * Used by lib/alerts.ts for critical-error notifications - reuses the same
+ * Resend client/from-address as the password reset email above, just a
+ * different recipient (env.ALERT_EMAIL) and plain-text body since this is
+ * an internal ops notification, not something a customer sees.
+ */
+export async function sendAlertEmail(subject: string, body: string) {
+  const resend = getClient();
+  if (!resend || !env.ALERT_EMAIL) {
+    return { sent: false };
+  }
+
+  try {
+    const { error } = await resend.emails.send({
+      from: env.RESEND_FROM_EMAIL,
+      to: env.ALERT_EMAIL,
+      subject,
+      text: body
+    });
+    if (error) {
+      console.error('[email] Resend rejected the alert email', error);
+      return { sent: false };
+    }
+    return { sent: true };
+  } catch (err) {
+    console.error('[email] Failed to send alert email', err);
+    return { sent: false };
+  }
+}

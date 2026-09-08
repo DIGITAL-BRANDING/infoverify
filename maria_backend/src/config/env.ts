@@ -84,6 +84,13 @@ const EnvSchema = z.object({
   // sending domain is verified in the Resend dashboard.
   RESEND_API_KEY: z.string().optional(),
   RESEND_FROM_EMAIL: z.string().default('MAJOR DATA-LINK <onboarding@resend.dev>'),
+  // Where lib/alerts.ts sends critical-error notifications (unhandled
+  // exceptions, uncaught rejections, and 5xx responses from unexpected -
+  // i.e. non-ApiError - errors). Optional: unset just means alerting is
+  // disabled and everything still only goes to console/Railway logs, same
+  // as before this existed. Reuses RESEND_API_KEY/RESEND_FROM_EMAIL above -
+  // no separate provider needed.
+  ALERT_EMAIL: z.string().email().optional(),
   // NOTE: z.coerce.boolean() would parse the STRING "false" as true (JS's
   // Boolean("false") === true Ã¢â‚¬â€ any non-empty string is truthy). This explicit
   // string comparison is what actually respects MOCK_PROVIDER=false in .env.

@@ -16,14 +16,22 @@
 import { env } from './config/env.js';
 import { createApp } from './app.js';
 import { prisma } from './lib/prisma.js';
+import { alertCriticalError } from './lib/alerts.js';
+import { purgeExpiredPii } from './scripts/purge-expired-pii.js';
 
 process.on('uncaughtException', (error) => {
   console.error('[server] uncaught exception', error);
+  // Best-effort: the process is exiting right after this regardless, so
+  // this can't be awaited - but an uncaught exception is by definition the
+  // most important thing this alerting will ever report, so it's worth the
+  // attempt even without a guarantee the email makes it out before exit.
+  void alertCriticalError('Uncaught exception (process exiting)', error);
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason) => {
   console.error('[server] unhandled rejection', reason);
+  void alertCriticalError('Unhandled promise rejection (process exiting)', reason);
   process.exit(1);
 });
 
@@ -83,6 +91,25 @@ async function startServer() {
     const server = app.listen(env.PORT, '0.0.0.0', () => {
       console.log(`MARIA Digital Solutions backend listening on port ${env.PORT}`);
     });
+
+    // Daily PII purge, running in-process rather than requiring a separate
+    // Railway Cron Job/external scheduler to be set up - `npm run
+    // purge:pii` still works standalone for anyone who prefers that
+    // instead (see purge-expired-pii.ts), but leaving it as opt-in-only
+    // meant it was never actually wired up anywhere: PII was accumulating
+    // past its retention window indefinitely. A short delay before the
+    // first run avoids adding a slow query to the critical first seconds
+    // after a fresh deploy; every run after that is a full 24h apart.
+    // Errors are caught and logged (+ alertCriticalError below) but never
+    // crash the server - a failed purge attempt should not take the whole
+    // app down, it'll simply retry tomorrow.
+    const PII_PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+    setTimeout(() => {
+      void purgeExpiredPii().catch((error) => void alertCriticalError('Scheduled PII purge failed', error));
+      setInterval(() => {
+        void purgeExpiredPii().catch((error) => void alertCriticalError('Scheduled PII purge failed', error));
+      }, PII_PURGE_INTERVAL_MS);
+    }, 60_000);
 
     server.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
